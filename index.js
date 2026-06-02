@@ -21,10 +21,26 @@ const providersAnnouncement = `${azureSvg} Microsoft Azure and ${awsSvg} AWS pro
 const gitHubStarAccouncement = `<b>If you like StackQL, give it a ⭐️ on <a target="_blank" rel="noopener noreferrer" href="https://github.com/stackql/stackql">GitHub</a> and follow us on <a target="_blank" rel="noopener noreferrer" href="https://twitter.com/stackql" >Twitter</a></b> ${TwitterSvg}`;
 const hacktoberfestAccouncement = `<b>🎃 Join us for <a target="_blank" rel="noopener noreferrer" href="https://github.com/stackql/stackql/issues?q=is%3Aissue+is%3Aopen+label%3Ahacktoberfest">Hacktoberfest</a>`;
 
-// Cross-site nav and footer items use absolute hrefs to their canonical home.
-// A relative `to: '/install'` would resolve against whichever microsite renders
-// it - none of which host /install. The canonical home for shared pages is the
-// main site; provider entries point at each provider microsite.
+// Shared paths that exist on the main site (stackql.io). The redirectsPlugin
+// below registers a route for each at the consumer site so that visiting
+// /install on any microsite client-side-redirects to https://stackql.io/install.
+// That means nav/footer items can use `to:` (relative) instead of `href:`
+// (absolute) - they navigate via the redirect route and Docusaurus does not
+// decorate them with the external-link icon.
+const REDIRECTS = {
+  '/install':        `${MAIN_SITE}/install`,
+  '/ai-agents':      `${MAIN_SITE}/ai-agents`,
+  '/stackql-deploy': `${MAIN_SITE}/stackql-deploy`,
+  '/providers':      `${MAIN_SITE}/providers`,
+  '/blog':           `${MAIN_SITE}/blog`,
+  '/tutorials':      `${MAIN_SITE}/tutorials`,
+  '/contact-us':     `${MAIN_SITE}/contact-us`,
+  '/stackqldocs':    `${MAIN_SITE}/stackqldocs`,
+};
+
+// Provider dropdown items stay as absolute hrefs - they point at OTHER provider
+// microsites, not at the main site, so the local redirect routes don't help.
+// Same goes for deeply-nested doc paths and the genuinely-external GitHub icon.
 const providerDropDownListItems = [
   { label: 'AWS', href: `${providerOrigin('aws')}/` },
   { label: 'Azure', href: `${providerOrigin('azure')}/` },
@@ -36,21 +52,46 @@ const providerDropDownListItems = [
   { label: 'GitHub', href: `${providerOrigin('github')}/` },
   { label: 'OpenAI', href: `${providerOrigin('openai')}/` },
   { label: 'Cloudflare', href: `${providerOrigin('cloudflare')}/` },
-  { label: '... More', href: `${MAIN_SITE}/providers` },
+  { label: '... More', to: '/providers' },
 ];
 
 const footerStackQLItems = [
-  { label: 'Documentation', href: `${MAIN_SITE}/stackqldocs` },
-  { label: 'Install', href: `${MAIN_SITE}/install` },
-  { label: 'Contact us', href: `${MAIN_SITE}/contact-us` },
+  { label: 'Documentation', to: '/stackqldocs' },
+  { label: 'Install', to: '/install' },
+  { label: 'Contact us', to: '/contact-us' },
 ];
 
 const footerMoreItems = [
-  { label: 'Providers', href: `${MAIN_SITE}/providers` },
-  { label: 'stackql-deploy', href: `${MAIN_SITE}/stackql-deploy` },
-  { label: 'Blog', href: `${MAIN_SITE}/blog` },
-  { label: 'Tutorials', href: `${MAIN_SITE}/tutorials` },
+  { label: 'Providers', to: '/providers' },
+  { label: 'stackql-deploy', to: '/stackql-deploy' },
+  { label: 'Blog', to: '/blog' },
+  { label: 'Tutorials', to: '/tutorials' },
 ];
+
+// Docusaurus plugin: register a client-side redirect route for each entry in
+// REDIRECTS. The Redirect component lives at @site/.shared-config/components,
+// which resolves via Docusaurus's @site alias to the consumer site's root,
+// where this repo has been vendored.
+function redirectsPlugin() {
+  return {
+    name: 'stackql-shared-redirects',
+    async contentLoaded({ actions }) {
+      const { addRoute, createData } = actions;
+      for (const [from, to] of Object.entries(REDIRECTS)) {
+        const dataPath = await createData(
+          `redirect${from.replace(/\//g, '_')}.json`,
+          JSON.stringify({ to }),
+        );
+        addRoute({
+          path: from,
+          component: '@site/.shared-config/components/Redirect.js',
+          modules: { target: dataPath },
+          exact: true,
+        });
+      }
+    },
+  };
+}
 
 function createConfig({ providerName, providerTitle, prismThemes, overrides = {} }) {
   if (!providerName || !providerTitle) {
@@ -114,6 +155,7 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
     ],
     plugins: [
       '@docusaurus/plugin-ideal-image',
+      redirectsPlugin,
     ],
     presets: [
       [
@@ -133,6 +175,7 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
           docs: {
             sidebarPath: './sidebars.js',
             path: 'docs',
+            routeBasePath: '/',
             sidebarCollapsible: true,
             showLastUpdateTime: false,
             editUrl: `https://github.com/stackql-registry/stackql-provider-${providerRepo}/edit/main/`,
@@ -182,13 +225,15 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
       navbar: {
         logo: {
           alt: 'StackQL',
-          href: `${MAIN_SITE}/`,
+          // Logo goes to the microsite's own root (the provider intro page),
+          // not back to stackql.io. Standard Docusaurus behavior.
+          to: '/',
           src: 'img/logo-original.svg',
           srcDark: 'img/logo-white.svg',
         },
         items: [
           {
-            href: `${MAIN_SITE}/install`,
+            to: '/install',
             label: 'Install',
             position: 'left',
           },
@@ -196,18 +241,21 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
             type: 'dropdown',
             label: 'AI Agents',
             position: 'left',
+            // Two distinct main-site pages: the MCP server CLI doc and the
+            // MCP tools index. Kept as absolute hrefs because they're deep
+            // doc paths not covered by the redirect map.
             items: [
               { href: `${MAIN_SITE}/docs/command-line-usage/mcp`, label: 'MCP Server' },
               { href: `${MAIN_SITE}/docs/mcp`, label: 'MCP Tools' },
             ],
           },
           {
-            href: `${MAIN_SITE}/stackql-deploy`,
+            to: '/stackql-deploy',
             label: 'stackql-deploy',
             position: 'left',
           },
           {
-            href: `${MAIN_SITE}/providers`,
+            to: '/providers',
             type: 'dropdown',
             label: 'Providers',
             position: 'left',
@@ -218,8 +266,8 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
             label: 'More',
             position: 'left',
             items: [
-              { href: `${MAIN_SITE}/blog`, label: 'Blog' },
-              { href: `${MAIN_SITE}/tutorials`, label: 'Tutorials' },
+              { to: '/blog', label: 'Blog' },
+              { to: '/tutorials', label: 'Tutorials' },
             ],
           },
           {
@@ -234,7 +282,9 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
         style: 'dark',
         logo: {
           alt: 'StackQL',
-          href: `${MAIN_SITE}/`,
+          // Footer logo also targets the microsite's own root, matching the
+          // navbar logo.
+          href: '/',
           src: 'img/logo-original.svg',
           srcDark: 'img/logo-white.svg',
         },

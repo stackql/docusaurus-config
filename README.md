@@ -96,12 +96,18 @@ it), not in the vendored module.
 Sidebars stay per-site. Read the title from `provider.js` instead of reaching
 into `config.title` and string-stripping it.
 
+Docs are mounted at the site root (`routeBasePath: '/'` in the shared
+preset), so the doc with `id: 'provider-intro'` is the page served at
+`https://<slug>-provider.stackql.io/`.
+
 ```js
 import { providerTitle } from './provider.js';
 
 const sidebars = {
   mainSidebar: [
-    { type: 'link', label: 'All Providers', href: 'https://stackql.io/providers' },
+    // `/providers` is registered by the shared redirect plugin and
+    // client-side-redirects to https://stackql.io/providers.
+    { type: 'link', label: 'All Providers', href: '/providers' },
     {
       type: 'category',
       label: `${providerTitle} Provider`,
@@ -146,13 +152,34 @@ parameter.
 
 ## Cross-site link behavior
 
-All shared menu items use absolute `href` urls. Consequences:
+Shared nav and footer items that point at the main site (`Install`,
+`stackql-deploy`, `Providers`, `Blog`, `Tutorials`, `Contact us`, etc.) use
+**relative `to:` URLs**. A bundled Docusaurus plugin (`stackql-shared-redirects`,
+defined in `index.js`) registers a route at each of those paths in the
+consumer site. Visiting `/install` on any microsite hits that route, which
+client-side-redirects to `https://stackql.io/install`.
 
-- Cross-site clicks are full-page loads, not SPA transitions (unavoidable
-  across origins).
-- Docusaurus does not compute an active-state highlight for `href` items.
-- You will likely want to suppress the external-link icon so the items read as
-  internal rather than outbound.
+The upside of going through redirect routes rather than absolute hrefs:
+
+- The items render without the external-link icon (Docusaurus only decorates
+  truly-external `href:` items).
+- Typing `https://aws-provider.stackql.io/install` directly into the address
+  bar lands on the right page instead of 404ing.
+- The same menu config works on `stackql.io` itself (if it ever consumes this
+  factory) - the redirect routes would no-op against the main site's actual
+  pages.
+
+Items that still use absolute `href:` (and therefore render with the
+external-link icon):
+
+- Providers dropdown items - they target *other* provider microsites, not the
+  main site, so the local redirect routes don't help.
+- AI Agents children - deep doc paths on the main site, not in the redirect
+  map.
+- The GitHub icon in the top right - genuinely external.
+
+Cross-site clicks still cause full-page loads (different origins, unavoidable),
+and Docusaurus computes no active-state highlight for redirect routes.
 
 ## Propagation
 
