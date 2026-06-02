@@ -226,8 +226,9 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
         logo: {
           alt: 'StackQL',
           // Logo goes to the microsite's own root (the provider intro page),
-          // not back to stackql.io. Standard Docusaurus behavior.
-          to: '/',
+          // not back to stackql.io. navbar.logo only accepts `href:` (not
+          // `to:`); a relative href is treated as internal.
+          href: '/',
           src: 'img/logo-original.svg',
           srcDark: 'img/logo-white.svg',
         },
