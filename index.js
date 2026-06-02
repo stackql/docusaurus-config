@@ -60,6 +60,16 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
     throw new Error('createConfig requires prismThemes (pass `themes` from prism-react-renderer)');
   }
 
+  // providerName is SQL-identifier-shaped (may contain underscores, e.g.
+  // 'entra_id'). Underscores aren't valid in DNS labels, so derive a slug for
+  // URLs and hostnames. providerName itself stays unchanged in user-visible
+  // text (titles, labels, keywords) where the underscore is correct.
+  //
+  // providerRepo is the GitHub repo name under stackql-registry, which uses
+  // neither separator (e.g. 'entra_id' -> 'entraid').
+  const providerSlug = providerName.replace(/_/g, '-');
+  const providerRepo = providerName.replace(/_/g, '');
+
   const lightCodeTheme = prismThemes.github;
   const darkCodeTheme = prismThemes.dracula;
   const nightOwlCodeTheme = prismThemes.nightOwl;
@@ -68,13 +78,13 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
     title: `StackQL ${providerTitle} Provider`,
     staticDirectories: ['static'],
     tagline: `Query and Provision ${providerTitle} Resources using StackQL`,
-    url: `https://${providerName}-provider.stackql.io`,
+    url: `https://${providerSlug}-provider.stackql.io`,
     baseUrl: '/',
     onBrokenLinks: 'warn',
     onBrokenMarkdownLinks: 'warn',
     favicon: '/favicon.ico',
     organizationName: 'stackql',
-    projectName: `stackql-provider-${providerName}`,
+    projectName: `stackql-provider-${providerRepo}`,
     baseUrlIssueBanner: false,
     trailingSlash: false,
     i18n: {
@@ -126,7 +136,7 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
             path: 'docs',
             sidebarCollapsible: true,
             showLastUpdateTime: true,
-            editUrl: `https://github.com/stackql/stackql-provider-${providerName}/edit/main/`,
+            editUrl: `https://github.com/stackql-registry/stackql-provider-${providerRepo}/edit/main/`,
           },
           blog: false,
           theme: {
