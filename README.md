@@ -126,7 +126,33 @@ export default sidebars;
 .shared-config/
 ```
 
-### 6. Per-site overrides
+### 6. Static assets and CSS
+
+The factory references these paths in the consumer site. They are contract, not
+convention - a missing file means a broken favicon or a failed build, and the
+build does not warn about the icon links.
+
+At the `static/` **root** (not `static/img/` - the head links are
+root-relative, so `/img/favicon.ico` is never looked at):
+
+```
+static/favicon.ico
+static/favicon-16x16.png
+static/favicon-32x32.png
+static/apple-touch-icon.png      # 180x180
+static/safari-pinned-tab.svg
+static/site.webmanifest          # name/short_name per site, icons point at the pngs above
+```
+
+These are brand assets, identical across properties - copy them from
+`stackql.io/static/`. The `site.webmanifest` is the one per-site exception
+(its `name`/`short_name` carry the site title).
+
+The preset's `customCss` is `./src/css/global.css` - the file must exist at
+that path (sites migrating from a self-contained config often have
+`src/css/custom.css`; rename it).
+
+### 7. Per-site overrides
 
 `createConfig` accepts an `overrides` object that is shallow-merged on top of
 the returned config. Use it for genuinely site-specific tweaks (a different
@@ -222,7 +248,7 @@ build behavior and in guarding `main`.
 ## Rollout order
 
 1. Land this repo on `main`. Add the smoke-test CI before relying on it.
-2. Wire one pilot provider site (steps 1-5 above). Build locally and on the
+2. Wire one pilot provider site (steps 1-6 above). Build locally and on the
    platform. Confirm the header, footer, and menus render identically to
    before, and that the absolute cross-site links resolve to the right
    properties.
