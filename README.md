@@ -179,8 +179,8 @@ parameter.
 ## Cross-site link behavior
 
 Shared nav and footer items that point at the main site (`Install`,
-`stackql-deploy`, `Providers`, `Blog`, `Tutorials`, `Contact us`, etc.) use
-**relative `to:` URLs**. A bundled Docusaurus plugin (`stackql-shared-redirects`,
+`stackql-deploy`, `Providers`, `Blog` and its three sections, `Quick Starts`,
+`Contact us`, etc.) use **relative `to:` URLs**. A bundled Docusaurus plugin (`stackql-shared-redirects`,
 defined in `index.js`) registers a route at each of those paths in the
 consumer site. Visiting `/install` on any microsite hits that route, which
 client-side-redirects to `https://stackql.io/install`.

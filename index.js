@@ -55,28 +55,51 @@ const hacktoberfestAccouncement = `<b>🎃 Join us for <a target="_blank" rel="n
 // of `href:`, which keeps them looking internal (no external-link icon) and
 // makes typed/bookmarked URLs land on the right page instead of 404ing.
 //
-// Three groups of redirects:
+// Four groups of redirects:
 //   - top-level shared destinations on the main site (Install, Blog, etc.)
-//   - deep doc paths on the main site (AI Agents children)
+//   - the main site's blog sections (one content-blog instance each)
+//   - deep doc paths on the main site (AI Agents children, Quick Starts)
 //   - one per provider, pointing at that provider's microsite
 //
 // The /providers top-level entry targets the docs index on the main site,
 // not the marketing page.
+
+// Blog sections on the main site. Keep in step with `blogSections` in
+// stackql.io/docusaurus.config.js. "Tutorials" means the blog section; the
+// docs walkthroughs formerly at /docs/tutorials are "Quick Starts".
+const BLOG_SECTIONS = [
+  { slug: 'product', label: 'Product Announcements' },
+  { slug: 'providers', label: 'Provider Announcements' },
+  { slug: 'tutorials', label: 'Tutorials' },
+];
+
 const REDIRECTS = {
   '/install':                       `${MAIN_SITE}/install`,
   '/ai-agents':                     `${MAIN_SITE}/ai-agents`,
   '/stackql-deploy':                `${MAIN_SITE}/stackql-deploy`,
   '/providers':                     `${MAIN_SITE}/docs/providers`,
   '/blog':                          `${MAIN_SITE}/blog`,
-  '/tutorials':                     `${MAIN_SITE}/tutorials`,
+  ...Object.fromEntries(
+    BLOG_SECTIONS.map(({ slug }) => [`/blog/${slug}`, `${MAIN_SITE}/blog/${slug}`]),
+  ),
+  // legacy path kept for bookmarks; the main site 301s it the same way
+  '/tutorials':                     `${MAIN_SITE}/blog/tutorials`,
   '/contact-us':                    `${MAIN_SITE}/contact-us`,
   '/stackqldocs':                   `${MAIN_SITE}/stackqldocs`,
   '/docs/command-line-usage/mcp':   `${MAIN_SITE}/docs/command-line-usage/mcp`,
   '/docs/mcp':                      `${MAIN_SITE}/docs/mcp`,
+  '/docs/quick-starts':             `${MAIN_SITE}/docs/quick-starts`,
   ...Object.fromEntries(
     PROVIDER_SLUGS.map((s) => [`/providers/${s}`, `${providerOrigin(s)}/`]),
   ),
 };
+
+// Built from BLOG_SECTIONS so the "More" menu, the footer and the redirect
+// map can't drift apart.
+const blogSectionItems = BLOG_SECTIONS.map(({ slug, label }) => ({
+  label,
+  to: `/blog/${slug}`,
+}));
 
 // Built from PROVIDER_SLUGS so the dropdown and the redirect map can't drift
 // apart. Each item navigates locally to /providers/<slug>, which the plugin
@@ -96,7 +119,8 @@ const footerMoreItems = [
   { label: 'Providers', to: '/providers' },
   { label: 'stackql-deploy', to: '/stackql-deploy' },
   { label: 'Blog', to: '/blog' },
-  { label: 'Tutorials', to: '/tutorials' },
+  ...blogSectionItems,
+  { label: 'Quick Starts', to: '/docs/quick-starts' },
 ];
 
 // Docusaurus plugin: register a client-side redirect route for each entry in
@@ -300,7 +324,8 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
             position: 'left',
             items: [
               { to: '/blog', label: 'Blog' },
-              { to: '/tutorials', label: 'Tutorials' },
+              ...blogSectionItems,
+              { to: '/docs/quick-starts', label: 'Quick Starts' },
             ],
           },
           {
