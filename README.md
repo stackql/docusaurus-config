@@ -24,12 +24,15 @@ the `createConfig` factory from there.
   relative `to: '/install'` would resolve against the rendering microsite,
   which has no such page.
 - Sidebars are per-site. Nothing in this repo touches them.
+- The Providers menu is generated when a site builds, from the catalog the
+  main site publishes at `https://stackql.io/providers.json`. Nothing in
+  this repo lists providers. See "Provider catalog".
 
 ## What lives here
 
 - `index.js` - exports `createConfig({ providerName, providerTitle, prismThemes, overrides })`,
   plus the building blocks it is made of (`buildNavbar`, `buildFooter`,
-  `redirectsPlugin`, `redirectRoutes`) for sites that compose their own
+  `sharedPlugin`, `redirectRoutes`) for sites that compose their own
   config - see "Composing instead of createConfig".
 - `components/Redirect.js` - the client-side redirect page used for every
   shared cross-site link. It carries a canonical link to its target and a
@@ -37,6 +40,14 @@ the `createConfig` factory from there.
   the routes are kept out of the sitemap by `createConfig`. No `noindex`:
   combined with a canonical that is a contradictory signal, and a redirect
   is never indexed anyway.
+- `theme/` - a Docusaurus theme that `sharedPlugin` registers on every
+  consumer. `NavbarItem/ComponentTypes.js` adds the navbar item type
+  `custom-providersDropdown`, rendered by
+  `NavbarItem/ProvidersDropdownNavbarItem` (the two-level Providers menu:
+  flyouts on desktop, nested collapsibles in the mobile sidebar). The files
+  are bundled by the consumer's build and use only React, Docusaurus core
+  aliases and theme-classic components, so they resolve under any
+  dependency set.
 - `README.md` - this file.
 
 Optionally (not yet added): shared static assets (`custom.css`, logos) and a
@@ -228,7 +239,7 @@ const shared = require('./.shared-config/index.js');
 const config = {
   url: 'https://stackql.io',
   baseUrl: '/docs/query-library/',
-  plugins: [[shared.redirectsPlugin, { selfUrl }], /* the site's own plugins */],
+  plugins: [[shared.sharedPlugin, { selfUrl }], /* the site's own plugins */],
   presets: [['@docusaurus/preset-classic', {
     sitemap: { ignorePatterns: shared.redirectRoutes(baseUrl, { selfUrl }) },
     // ...
@@ -245,7 +256,7 @@ const config = {
   too), so replace the logo or map over the items freely; the shared
   template is untouched.
 - `selfUrl` (optional) is the consuming site's public URL, origin plus
-  baseUrl, passed to `buildNavbar`, `buildFooter`, `redirectsPlugin` (as its
+  baseUrl, passed to `buildNavbar`, `buildFooter`, `sharedPlugin` (as its
   plugin options) and `redirectRoutes`. The shared item whose redirect
   target is that URL becomes an internal link to `/`, and its redirect
   route is not registered at all: it would be a page redirecting to its own
@@ -256,7 +267,8 @@ const config = {
   library passes `https://stackql.io/docs/query-library/`; its AI Agents >
   Query Library entry links straight to its landing page and nothing in
   the consumer names the label or the path.
-- `redirectsPlugin` registers its routes under the consumer's `baseUrl`
+- `sharedPlugin` (also exported under its former name, `redirectsPlugin`)
+  registers its routes under the consumer's `baseUrl`
   (`/docs/query-library/install` on the query library, `/install` on a
   microsite), which is where Docusaurus resolves the relative `to:` values
   anyway. `redirectRoutes(baseUrl)` lists those full paths for sitemap
@@ -268,8 +280,8 @@ const config = {
 
 Shared nav and footer items that point at the main site (`Install`,
 `stackql-deploy`, `Providers`, `Blog` and its three sections, `Quick Starts`,
-`Contact us`, etc.) use **relative `to:` URLs**. A bundled Docusaurus plugin (`stackql-shared-redirects`,
-defined in `index.js`) registers a route at each of those paths in the
+`Contact us`, etc.) use **relative `to:` URLs**. A bundled Docusaurus plugin (`stackql-shared`,
+the `sharedPlugin` export of `index.js`) registers a route at each of those paths in the
 consumer site. Visiting `/install` on any microsite hits that route, which
 client-side-redirects to `https://stackql.io/install`.
 
@@ -283,19 +295,52 @@ The upside of going through redirect routes rather than absolute hrefs:
   factory) - the redirect routes would no-op against the main site's actual
   pages.
 
-The Providers dropdown items go through the same redirect routes, but each
-`/providers/<slug>` targets that provider's microsite rather than the main
-site (`PROVIDER_SLUGS` mirrors the `featured` entries of the main site's
-provider catalog, same order; keep the two in step by hand). The AI Agents
-children are in the redirect map too (`/docs/command-line-usage/mcp`,
-`/docs/mcp`, `/docs/mcp/embedded`, `/docs/query-library`).
+The AI Agents children are in the redirect map too
+(`/docs/command-line-usage/mcp`, `/docs/mcp`, `/docs/mcp/embedded`,
+`/docs/query-library`), and so is the "Providers" label itself
+(`/providers`). The rows inside the Providers menu are the exception: they
+are plain same-tab anchors to the catalog page's sections and to the
+provider microsites, rendered by the menu component rather than by
+Docusaurus's link item, so they carry no external-link icon and need no
+redirect route. See "Provider catalog".
 
-The one item that still uses an absolute `href:` (and therefore renders with
-the external-link icon) is the GitHub icon in the top right - genuinely
-external.
+The one item that uses Docusaurus's own external `href:` handling (and
+therefore renders with the external-link icon) is the GitHub icon in the
+top right - genuinely external.
 
 Cross-site clicks still cause full-page loads (different origins, unavoidable),
 and Docusaurus computes no active-state highlight for redirect routes.
+
+## Provider catalog
+
+The Providers menu lists every provider the main site knows, grouped by
+category, and is generated when the consuming site builds:
+
+1. `stackql.io` publishes its catalog (`src/configs/providers.json` in that
+   repo) as `https://stackql.io/providers.json` on every build. The plugin
+   that writes it, `plugins/provider-catalog` there, documents the shape;
+   the current shape is version 1.
+2. `sharedPlugin` fetches that file in its `loadContent` hook, validates it
+   and publishes it as plugin global data (`usePluginData('stackql-shared')`).
+3. `theme/NavbarItem/ProvidersDropdownNavbarItem` renders it: category rows
+   link to the category's section of `https://stackql.io/providers`,
+   provider rows to the provider microsites.
+
+Adding a provider to the main site's catalog therefore reaches every
+property on its next build after the main site deploys. Nothing in this
+repo lists providers.
+
+- A build that cannot fetch the catalog fails. Network errors and 5xx
+  responses are retried twice; a 4xx or a document that does not validate
+  fails at once. Same rule as the vendoring clone: fail loud, the previous
+  deploy stays live.
+- `STACKQL_PROVIDER_CATALOG` overrides the source with another URL or a
+  local file path, for an offline `yarn start` or for building against an
+  unpublished catalog (for example a local build of stackql.io served on
+  localhost). A composing site can also pass `catalogUrl` as a plugin
+  option; the environment variable wins over both.
+- The main site renders the same menu from its own copy of the component
+  (`src/theme/NavbarItem` in the stackql.io repo). Change the two together.
 
 ## Propagation
 
@@ -318,6 +363,9 @@ build behavior and in guarding `main`.
 - **Fail loud, not stale.** A failed clone stops the build. Previous successful
   deploy stays live. That is the real last-known-good - do not add a committed
   snapshot fallback.
+- **The provider catalog is fetched, not vendored,** and follows the same
+  rule: a catalog that cannot be fetched or does not validate stops the
+  build. "Provider catalog" has the override for working offline.
 - **Guard `main`.** Every site tracks it unpinned, so a bad commit breaks the
   next build of every site at once. Protect the branch with PR review and a CI
   smoke test in this repo that imports `createConfig`, invokes it, and runs
