@@ -74,10 +74,13 @@ const BLOG_SECTIONS = [
 ];
 
 const REDIRECTS = {
-  '/install':                       `${MAIN_SITE}/install`,
+  // The main site is docs-only with the docs tree at its root (no /docs
+  // prefix); targets below point at the canonical pages, not at the main
+  // site's own redirect stubs.
+  '/install':                       `${MAIN_SITE}/installing-stackql`,
   '/ai-agents':                     `${MAIN_SITE}/ai-agents`,
   '/stackql-deploy':                `${MAIN_SITE}/stackql-deploy`,
-  '/providers':                     `${MAIN_SITE}/docs/providers`,
+  '/providers':                     `${MAIN_SITE}/providers`,
   '/blog':                          `${MAIN_SITE}/blog`,
   ...Object.fromEntries(
     BLOG_SECTIONS.map(({ slug }) => [`/blog/${slug}`, `${MAIN_SITE}/blog/${slug}`]),
@@ -85,10 +88,10 @@ const REDIRECTS = {
   // legacy path kept for bookmarks; the main site 301s it the same way
   '/tutorials':                     `${MAIN_SITE}/blog/tutorials`,
   '/contact-us':                    `${MAIN_SITE}/contact-us`,
-  '/stackqldocs':                   `${MAIN_SITE}/stackqldocs`,
-  '/docs/command-line-usage/mcp':   `${MAIN_SITE}/docs/command-line-usage/mcp`,
-  '/docs/mcp':                      `${MAIN_SITE}/docs/mcp`,
-  '/docs/quick-starts':             `${MAIN_SITE}/docs/quick-starts`,
+  '/stackqldocs':                   `${MAIN_SITE}/`,
+  '/docs/command-line-usage/mcp':   `${MAIN_SITE}/command-line-usage/mcp`,
+  '/docs/mcp':                      `${MAIN_SITE}/mcp`,
+  '/docs/quick-starts':             `${MAIN_SITE}/quick-starts`,
   ...Object.fromEntries(
     PROVIDER_SLUGS.map((s) => [`/providers/${s}`, `${providerOrigin(s)}/`]),
   ),
