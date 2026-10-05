@@ -78,7 +78,8 @@ const REDIRECTS = {
   // prefix); targets below point at the canonical pages, not at the main
   // site's own redirect stubs.
   '/install':                       `${MAIN_SITE}/installing-stackql`,
-  '/ai-agents':                     `${MAIN_SITE}/ai-agents`,
+  // no '/ai-agents' entry: "AI Agents" is a dropdown with no page of its
+  // own on the main site; its children are the MCP routes below
   '/stackql-deploy':                `${MAIN_SITE}/stackql-deploy`,
   '/providers':                     `${MAIN_SITE}/providers`,
   '/blog':                          `${MAIN_SITE}/blog`,
