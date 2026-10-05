@@ -55,28 +55,61 @@ const hacktoberfestAccouncement = `<b>🎃 Join us for <a target="_blank" rel="n
 // of `href:`, which keeps them looking internal (no external-link icon) and
 // makes typed/bookmarked URLs land on the right page instead of 404ing.
 //
-// Three groups of redirects:
+// Four groups of redirects:
 //   - top-level shared destinations on the main site (Install, Blog, etc.)
-//   - deep doc paths on the main site (AI Agents children)
+//   - the main site's blog sections (one content-blog instance each)
+//   - deep doc paths on the main site (AI Agents children, Quick Starts)
 //   - one per provider, pointing at that provider's microsite
 //
 // The /providers top-level entry targets the docs index on the main site,
 // not the marketing page.
+
+// Blog sections on the main site. Keep in step with `blogSections` in
+// stackql.io/docusaurus.config.js. "Tutorials" means the blog section; the
+// docs walkthroughs formerly at /docs/tutorials are "Quick Starts".
+const BLOG_SECTIONS = [
+  { slug: 'product', label: 'Product Announcements', navLabel: '📣 Product Announcements' },
+  { slug: 'providers', label: 'Provider Announcements', navLabel: '📣 Provider Announcements' },
+  { slug: 'tutorials', label: 'Tutorials' },
+];
+
 const REDIRECTS = {
-  '/install':                       `${MAIN_SITE}/install`,
-  '/ai-agents':                     `${MAIN_SITE}/ai-agents`,
+  // The main site is docs-only with the docs tree at its root (no /docs
+  // prefix); targets below point at the canonical pages, not at the main
+  // site's own redirect stubs.
+  '/install':                       `${MAIN_SITE}/installing-stackql`,
+  // no '/ai-agents' entry: "AI Agents" is a dropdown with no page of its
+  // own on the main site; its children are the MCP routes below
   '/stackql-deploy':                `${MAIN_SITE}/stackql-deploy`,
-  '/providers':                     `${MAIN_SITE}/docs/providers`,
+  '/providers':                     `${MAIN_SITE}/providers`,
   '/blog':                          `${MAIN_SITE}/blog`,
-  '/tutorials':                     `${MAIN_SITE}/tutorials`,
+  ...Object.fromEntries(
+    BLOG_SECTIONS.map(({ slug }) => [`/blog/${slug}`, `${MAIN_SITE}/blog/${slug}`]),
+  ),
+  // legacy path kept for bookmarks; the main site 301s it the same way
+  '/tutorials':                     `${MAIN_SITE}/blog/tutorials`,
   '/contact-us':                    `${MAIN_SITE}/contact-us`,
-  '/stackqldocs':                   `${MAIN_SITE}/stackqldocs`,
-  '/docs/command-line-usage/mcp':   `${MAIN_SITE}/docs/command-line-usage/mcp`,
-  '/docs/mcp':                      `${MAIN_SITE}/docs/mcp`,
+  '/stackqldocs':                   `${MAIN_SITE}/`,
+  '/docs/command-line-usage/mcp':   `${MAIN_SITE}/command-line-usage/mcp`,
+  '/docs/mcp':                      `${MAIN_SITE}/mcp`,
+  '/docs/quick-starts':             `${MAIN_SITE}/quick-starts`,
   ...Object.fromEntries(
     PROVIDER_SLUGS.map((s) => [`/providers/${s}`, `${providerOrigin(s)}/`]),
   ),
 };
+
+// Built from BLOG_SECTIONS so the "More" menu, the footer and the redirect
+// map can't drift apart. The header carries the bullhorn labels, the
+// footer the plain ones; the /blog landing page is not linked from either,
+// matching the main site.
+const blogSectionNavItems = BLOG_SECTIONS.map(({ slug, label, navLabel }) => ({
+  label: navLabel || label,
+  to: `/blog/${slug}`,
+}));
+const blogSectionFooterItems = BLOG_SECTIONS.map(({ slug, label }) => ({
+  label,
+  to: `/blog/${slug}`,
+}));
 
 // Built from PROVIDER_SLUGS so the dropdown and the redirect map can't drift
 // apart. Each item navigates locally to /providers/<slug>, which the plugin
@@ -95,8 +128,8 @@ const footerStackQLItems = [
 const footerMoreItems = [
   { label: 'Providers', to: '/providers' },
   { label: 'stackql-deploy', to: '/stackql-deploy' },
-  { label: 'Blog', to: '/blog' },
-  { label: 'Tutorials', to: '/tutorials' },
+  ...blogSectionFooterItems,
+  { label: 'Quick Starts', to: '/docs/quick-starts' },
 ];
 
 // Docusaurus plugin: register a client-side redirect route for each entry in
@@ -299,8 +332,8 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
             label: 'More',
             position: 'left',
             items: [
-              { to: '/blog', label: 'Blog' },
-              { to: '/tutorials', label: 'Tutorials' },
+              ...blogSectionNavItems,
+              { to: '/docs/quick-starts', label: 'Quick Starts' },
             ],
           },
           {
