@@ -109,13 +109,23 @@ Docs are mounted at the site root (`routeBasePath: '/'` in the shared
 preset), so the doc with `id: 'provider-intro'` is the page served at
 `https://<slug>-provider.stackql.io/`.
 
+The sidebar opens with a way back to the main docs. `/stackqldocs` and
+`/providers` are both registered by the shared redirect plugin and
+client-side-redirect to `https://stackql.io/` and `https://stackql.io/providers`,
+so the links render as internal (no external-link icon) and the broken-link
+checker validates them. The query library site carries the same back link.
+
 ```js
 import { providerTitle } from './provider.js';
 
 const sidebars = {
   mainSidebar: [
-    // `/providers` is registered by the shared redirect plugin and
-    // client-side-redirects to https://stackql.io/providers.
+    {
+      type: 'link',
+      label: 'Back to StackQL Docs',
+      href: '/stackqldocs',
+      className: 'sidebar-back-link',
+    },
     { type: 'link', label: 'All Providers', href: '/providers' },
     {
       type: 'category',
@@ -127,6 +137,26 @@ const sidebars = {
 };
 
 export default sidebars;
+```
+
+The back link's arrow and divider are site CSS (this repo ships no
+stylesheet - see step 6). Add to `src/css/global.css`:
+
+```css
+.sidebar-back-link {
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem !important;
+}
+
+.sidebar-back-link .menu__link {
+  font-weight: 600;
+}
+
+.sidebar-back-link .menu__link::before {
+  content: '\2190';
+  margin-right: 0.5rem;
+}
 ```
 
 ### 5. `.gitignore`
