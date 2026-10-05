@@ -148,23 +148,46 @@ function redirectRoute(baseUrl, from) {
   return `${(baseUrl || '/').replace(/\/+$/, '')}${from}`;
 }
 
+// True when a redirect target is the consuming site itself. selfUrl is the
+// site's public URL (origin + baseUrl); trailing slashes are ignored.
+function isSelf(to, selfUrl) {
+  if (!selfUrl) return false;
+  const strip = (u) => String(u || '').replace(/\/+$/, '');
+  return strip(to) === strip(selfUrl);
+}
+
+// The REDIRECTS entries a consumer site registers: all of them, minus the
+// one that targets the site itself when selfUrl is given. That entry would
+// be a page redirecting to its own site, and on a site served under a
+// prefix it collides with the baseUrl root: on the query library the route
+// /docs/query-library/docs/query-library builds to docs/query-library.html,
+// which Netlify's pretty-URL handling then serves (after a 301 that drops
+// the trailing slash) in place of the /docs/query-library/ landing page on
+// any direct hit on the origin, looping with the site's own prefix redirect.
+function redirectEntries(selfUrl) {
+  return Object.entries(REDIRECTS).filter(([, to]) => !isSelf(to, selfUrl));
+}
+
 // Every shared redirect route on a consumer site: for sitemap
-// ignorePatterns, structured-data exclusions and the like.
-function redirectRoutes(baseUrl) {
-  return Object.keys(REDIRECTS).map((from) => redirectRoute(baseUrl, from));
+// ignorePatterns, structured-data exclusions and the like. Pass the same
+// selfUrl as to redirectsPlugin so the two lists agree.
+function redirectRoutes(baseUrl, { selfUrl } = {}) {
+  return redirectEntries(selfUrl).map(([from]) => redirectRoute(baseUrl, from));
 }
 
 // Docusaurus plugin: register a client-side redirect route for each entry in
 // REDIRECTS. The Redirect component lives at @site/.shared-config/components,
 // which resolves via Docusaurus's @site alias to the consumer site's root,
-// where this repo has been vendored.
-function redirectsPlugin(context) {
+// where this repo has been vendored. Options (plugins: [[redirectsPlugin,
+// { selfUrl }]]): selfUrl drops the entry that targets the site itself, see
+// redirectEntries. createConfig passes none.
+function redirectsPlugin(context, { selfUrl } = {}) {
   const { baseUrl } = context.siteConfig;
   return {
     name: 'stackql-shared-redirects',
     async contentLoaded({ actions }) {
       const { addRoute, createData } = actions;
-      for (const [from, to] of Object.entries(REDIRECTS)) {
+      for (const [from, to] of redirectEntries(selfUrl)) {
         const dataPath = await createData(
           `redirect${from.replace(/\//g, '_')}.json`,
           JSON.stringify({ to }),
@@ -200,9 +223,7 @@ function buildLogo() {
 // where it started. The comparison lives here, next to REDIRECTS, so the
 // consumer never has to know which label or path to look for.
 function localiseSelf(item, selfUrl) {
-  if (!selfUrl || !item.to) return item;
-  const strip = (u) => String(u || '').replace(/\/+$/, '');
-  return strip(REDIRECTS[item.to]) === strip(selfUrl) ? { ...item, to: '/' } : item;
+  return item.to && isSelf(REDIRECTS[item.to], selfUrl) ? { ...item, to: '/' } : item;
 }
 
 // themeConfig.navbar for every StackQL property. Returns a fresh object with
