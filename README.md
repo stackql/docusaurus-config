@@ -27,7 +27,16 @@ the `createConfig` factory from there.
 
 ## What lives here
 
-- `index.js` - exports `createConfig({ providerName, providerTitle, prismThemes, overrides })`.
+- `index.js` - exports `createConfig({ providerName, providerTitle, prismThemes, overrides })`,
+  plus the building blocks it is made of (`buildNavbar`, `buildFooter`,
+  `redirectsPlugin`, `redirectRoutes`) for sites that compose their own
+  config - see "Composing instead of createConfig".
+- `components/Redirect.js` - the client-side redirect page used for every
+  shared cross-site link. It carries a canonical link to its target and a
+  zero-second meta refresh (which search engines treat as a redirect), and
+  the routes are kept out of the sitemap by `createConfig`. No `noindex`:
+  combined with a canonical that is a contradictory signal, and a redirect
+  is never indexed anyway.
 - `README.md` - this file.
 
 Optionally (not yet added): shared static assets (`custom.css`, logos) and a
@@ -176,6 +185,50 @@ wholesale, not deep-merged. If you need to tweak something nested, copy the
 whole branch into `overrides`, or extend the factory to accept a more specific
 parameter.
 
+## Composing instead of createConfig
+
+`createConfig` assumes a provider microsite: docs at the site root, `baseUrl`
+`/`, the classic preset with gtag and mermaid. A site that does not fit that
+shape keeps its own `docusaurus.config.js` and takes only the chrome from
+here, so the header, footer and cross-site links still come from one place:
+
+```js
+const shared = require('./.shared-config/index.js');
+
+const config = {
+  url: 'https://stackql.io',
+  baseUrl: '/docs/query-library/',
+  plugins: [shared.redirectsPlugin, /* the site's own plugins */],
+  presets: [['@docusaurus/preset-classic', {
+    sitemap: { ignorePatterns: shared.redirectRoutes('/docs/query-library/') },
+    // ...
+  }]],
+  themeConfig: {
+    navbar: { ...shared.buildNavbar({ selfUrl }), logo },
+    footer: { ...shared.buildFooter({ selfUrl }), logo },
+    // ...
+  },
+};
+```
+
+- `buildNavbar()` and `buildFooter()` return fresh objects (fresh arrays
+  too), so replace the logo or map over the items freely; the shared
+  template is untouched.
+- `selfUrl` (optional) is the consuming site's public URL, origin plus
+  baseUrl. Any shared item whose redirect target is that URL becomes an
+  internal link to `/`, so a property that is itself one of the shared
+  destinations never bounces through a redirect page to reach its own
+  root. The query library passes `https://stackql.io/docs/query-library/`
+  and its AI Agents > Query Library entry links straight to its landing
+  page; nothing in the consumer names the label or the path.
+- `redirectsPlugin` registers its routes under the consumer's `baseUrl`
+  (`/docs/query-library/install` on the query library, `/install` on a
+  microsite), which is where Docusaurus resolves the relative `to:` values
+  anyway. `redirectRoutes(baseUrl)` lists those full paths for sitemap
+  `ignorePatterns`, structured-data exclusions and similar.
+- The consumer today is the query library (`query-library.stackql.io`
+  repo), proxied at `stackql.io/docs/query-library/`.
+
 ## Cross-site link behavior
 
 Shared nav and footer items that point at the main site (`Install`,
@@ -195,14 +248,16 @@ The upside of going through redirect routes rather than absolute hrefs:
   factory) - the redirect routes would no-op against the main site's actual
   pages.
 
-Items that still use absolute `href:` (and therefore render with the
-external-link icon):
+The Providers dropdown items go through the same redirect routes, but each
+`/providers/<slug>` targets that provider's microsite rather than the main
+site (`PROVIDER_SLUGS` mirrors the `featured` entries of the main site's
+provider catalog, same order; keep the two in step by hand). The AI Agents
+children are in the redirect map too (`/docs/command-line-usage/mcp`,
+`/docs/mcp`, `/docs/mcp/embedded`, `/docs/query-library`).
 
-- Providers dropdown items - they target *other* provider microsites, not the
-  main site, so the local redirect routes don't help.
-- AI Agents children - deep doc paths on the main site, not in the redirect
-  map.
-- The GitHub icon in the top right - genuinely external.
+The one item that still uses an absolute `href:` (and therefore renders with
+the external-link icon) is the GitHub icon in the top right - genuinely
+external.
 
 Cross-site clicks still cause full-page loads (different origins, unavoidable),
 and Docusaurus computes no active-state highlight for redirect routes.
