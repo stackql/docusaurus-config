@@ -68,8 +68,8 @@ const hacktoberfestAccouncement = `<b>🎃 Join us for <a target="_blank" rel="n
 // stackql.io/docusaurus.config.js. "Tutorials" means the blog section; the
 // docs walkthroughs formerly at /docs/tutorials are "Quick Starts".
 const BLOG_SECTIONS = [
-  { slug: 'product', label: 'Product Announcements' },
-  { slug: 'providers', label: 'Provider Announcements' },
+  { slug: 'product', label: 'Product Announcements', navLabel: '📣 Product Announcements' },
+  { slug: 'providers', label: 'Provider Announcements', navLabel: '📣 Provider Announcements' },
   { slug: 'tutorials', label: 'Tutorials' },
 ];
 
@@ -99,8 +99,14 @@ const REDIRECTS = {
 };
 
 // Built from BLOG_SECTIONS so the "More" menu, the footer and the redirect
-// map can't drift apart.
-const blogSectionItems = BLOG_SECTIONS.map(({ slug, label }) => ({
+// map can't drift apart. The header carries the bullhorn labels, the
+// footer the plain ones; the /blog landing page is not linked from either,
+// matching the main site.
+const blogSectionNavItems = BLOG_SECTIONS.map(({ slug, label, navLabel }) => ({
+  label: navLabel || label,
+  to: `/blog/${slug}`,
+}));
+const blogSectionFooterItems = BLOG_SECTIONS.map(({ slug, label }) => ({
   label,
   to: `/blog/${slug}`,
 }));
@@ -122,8 +128,7 @@ const footerStackQLItems = [
 const footerMoreItems = [
   { label: 'Providers', to: '/providers' },
   { label: 'stackql-deploy', to: '/stackql-deploy' },
-  { label: 'Blog', to: '/blog' },
-  ...blogSectionItems,
+  ...blogSectionFooterItems,
   { label: 'Quick Starts', to: '/docs/quick-starts' },
 ];
 
@@ -327,8 +332,7 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
             label: 'More',
             position: 'left',
             items: [
-              { to: '/blog', label: 'Blog' },
-              ...blogSectionItems,
+              ...blogSectionNavItems,
               { to: '/docs/quick-starts', label: 'Quick Starts' },
             ],
           },
