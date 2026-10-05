@@ -198,9 +198,9 @@ const shared = require('./.shared-config/index.js');
 const config = {
   url: 'https://stackql.io',
   baseUrl: '/docs/query-library/',
-  plugins: [shared.redirectsPlugin, /* the site's own plugins */],
+  plugins: [[shared.redirectsPlugin, { selfUrl }], /* the site's own plugins */],
   presets: [['@docusaurus/preset-classic', {
-    sitemap: { ignorePatterns: shared.redirectRoutes('/docs/query-library/') },
+    sitemap: { ignorePatterns: shared.redirectRoutes(baseUrl, { selfUrl }) },
     // ...
   }]],
   themeConfig: {
@@ -215,12 +215,17 @@ const config = {
   too), so replace the logo or map over the items freely; the shared
   template is untouched.
 - `selfUrl` (optional) is the consuming site's public URL, origin plus
-  baseUrl. Any shared item whose redirect target is that URL becomes an
-  internal link to `/`, so a property that is itself one of the shared
-  destinations never bounces through a redirect page to reach its own
-  root. The query library passes `https://stackql.io/docs/query-library/`
-  and its AI Agents > Query Library entry links straight to its landing
-  page; nothing in the consumer names the label or the path.
+  baseUrl, passed to `buildNavbar`, `buildFooter`, `redirectsPlugin` (as its
+  plugin options) and `redirectRoutes`. The shared item whose redirect
+  target is that URL becomes an internal link to `/`, and its redirect
+  route is not registered at all: it would be a page redirecting to its own
+  site, and on a site served under a prefix it collides with the baseUrl
+  root (`/docs/query-library/docs/query-library` builds to
+  `docs/query-library.html`, which Netlify's pretty URLs serve in place of
+  the `/docs/query-library/` landing page on direct hits). The query
+  library passes `https://stackql.io/docs/query-library/`; its AI Agents >
+  Query Library entry links straight to its landing page and nothing in
+  the consumer names the label or the path.
 - `redirectsPlugin` registers its routes under the consumer's `baseUrl`
   (`/docs/query-library/install` on the query library, `/install` on a
   microsite), which is where Docusaurus resolves the relative `to:` values
