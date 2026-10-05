@@ -10,36 +10,18 @@
 const MAIN_SITE = 'https://stackql.io';
 const providerOrigin = (name) => `https://${name}-provider.stackql.io`;
 
-// Provider slugs that get a local /providers/<slug> redirect to their
-// microsite. Order here drives the navbar dropdown order. Keep in step with
-// the `featured` entries of src/configs/providers.json in the stackql.io
-// repo (same order, label = shortName). Slugs are the microsite hostnames,
-// so Databricks is `databricks-account`.
-const PROVIDER_SLUGS = [
-  'aws',
-  'azure',
-  'google',
-  'cloudflare',
-  'databricks-account',
-  'snowflake',
-  'confluent',
-  'okta',
-  'openai',
-  'github',
-];
-
-const PROVIDER_LABELS = {
-  aws: 'AWS',
-  azure: 'Azure',
-  google: 'Google',
-  cloudflare: 'Cloudflare',
-  'databricks-account': 'Databricks',
-  snowflake: 'Snowflake',
-  confluent: 'Confluent',
-  okta: 'Okta',
-  openai: 'OpenAI',
-  github: 'GitHub',
-};
+// The Providers menu is a two-level dropdown (category -> provider) built
+// from the provider catalog the main site publishes at
+// https://stackql.io/providers.json (stackql.io repo: plugins/provider-catalog,
+// generated from src/configs/providers.json on every build). sharedPlugin
+// below fetches it when the consuming site builds and hands it to the menu
+// component (theme/NavbarItem) as plugin global data, so every property
+// lists whatever the main site knows on the day it builds and nothing here
+// is kept in step by hand. A build that cannot fetch the catalog fails, by
+// design (README, "Reliability"). STACKQL_PROVIDER_CATALOG overrides the
+// source with another URL or a local file path, for offline work or for
+// building against an unpublished catalog.
+const PROVIDER_CATALOG_URL = `${MAIN_SITE}/providers.json`;
 
 const awsSvg =
   `<svg preserveAspectRatio="none" width="30" height="20" viewBox="14.7 23 42 26.2" xmlns="http://www.w3.org/2000/svg"><polygon points="27.09 35.764 25.984 40.34 28.182 40.34 27.115 35.764" fill="#F7981F"/><path d="m16.302 40.744v0.666c0 3.311 3.579 6.66 7.991 6.66h23.533c4.412 0 7.991-3.35 7.991-6.66v-0.666c0-3.078-3.098-6.943-7.081-7.283-0.089-2.752-2.342-4.955-5.113-4.955-1.076 0-2.074 0.334-2.898 0.9-1.58-3.52-5.107-5.977-9.216-5.977-5.579 0-10.101 4.521-10.101 10.102 0 0.1 0.012 0.195 0.015 0.293-2.993 0.867-5.121 4.371-5.121 6.92zm12.699 3.055l-0.572-2.275h-2.717l-0.599 2.275h-1.547l2.639-9.283h1.898l2.444 9.283h-1.546zm9.012 0h-1.716l-1.196-6.994h-0.026l-1.183 6.994h-1.716l-1.795-9.283h1.496l1.221 7.215h0.027l1.221-7.215h1.561l1.248 7.254h0.026l1.209-7.254h1.469l-1.846 9.283zm5.433 0.181c-2.301 0-2.821-1.533-2.821-2.834v-0.221h1.482v0.234c0 1.131 0.494 1.703 1.521 1.703 0.936 0 1.403-0.664 1.403-1.354 0-0.975-0.493-1.404-1.325-1.65l-1.015-0.352c-1.353-0.52-1.937-1.221-1.937-2.547 0-1.691 1.144-2.627 2.886-2.627 2.379 0 2.626 1.482 2.626 2.443v0.209h-1.482v-0.195c0-0.846-0.377-1.34-1.3-1.34-0.637 0-1.248 0.352-1.248 1.34 0 0.793 0.403 1.195 1.392 1.572l1 0.365c1.313 0.467 1.886 1.184 1.886 2.457 1e-3 1.979-1.196 2.797-3.068 2.797z" fill="#F7981F"/><path d="m26.205 34.516l-2.639 9.283h1.547l0.599-2.275h2.717l0.572 2.275h1.547l-2.444-9.283h-1.899zm-0.221 5.824l1.105-4.576h0.025l1.066 4.576h-2.196z" fill="#fff"/><polygon points="37.181 41.77 37.154 41.77 35.906 34.516 34.346 34.516 33.125 41.73 33.098 41.73 31.877 34.516 30.381 34.516 32.176 43.799 33.892 43.799 35.074 36.805 35.101 36.805 36.297 43.799 38.013 43.799 39.858 34.516 38.39 34.516" fill="#fff"/><path d="m44.629 38.729l-1-0.365c-0.988-0.377-1.392-0.779-1.392-1.572 0-0.988 0.611-1.34 1.248-1.34 0.923 0 1.3 0.494 1.3 1.34v0.195h1.482v-0.209c0-0.961-0.247-2.443-2.626-2.443-1.742 0-2.886 0.936-2.886 2.627 0 1.326 0.584 2.027 1.937 2.547l1.015 0.352c0.832 0.246 1.325 0.676 1.325 1.65 0 0.689-0.468 1.354-1.403 1.354-1.027 0-1.521-0.572-1.521-1.703v-0.234h-1.482v0.221c0 1.301 0.521 2.834 2.821 2.834 1.872 0 3.068-0.818 3.068-2.795 0-1.276-0.573-1.993-1.886-2.459z" fill="#fff"/></svg>`;
@@ -52,20 +34,22 @@ const providersAnnouncement = `${azureSvg} Microsoft Azure and ${awsSvg} AWS pro
 const gitHubStarAccouncement = `<b>If you like StackQL, give it a ⭐️ on <a target="_blank" rel="noopener noreferrer" href="https://github.com/stackql/stackql">GitHub</a> and follow us on <a target="_blank" rel="noopener noreferrer" href="https://twitter.com/stackql" >Twitter</a></b> ${TwitterSvg}`;
 const hacktoberfestAccouncement = `<b>🎃 Join us for <a target="_blank" rel="noopener noreferrer" href="https://github.com/stackql/stackql/issues?q=is%3Aissue+is%3Aopen+label%3Ahacktoberfest">Hacktoberfest</a>`;
 
-// Shared paths registered locally on every consumer site by the
-// redirectsPlugin below. Each entry registers a route at the consumer site
-// that client-side-redirects to the target. Items can then use `to:` instead
-// of `href:`, which keeps them looking internal (no external-link icon) and
+// Shared paths registered locally on every consumer site by sharedPlugin
+// below. Each entry registers a route at the consumer site that
+// client-side-redirects to the target. Items can then use `to:` instead of
+// `href:`, which keeps them looking internal (no external-link icon) and
 // makes typed/bookmarked URLs land on the right page instead of 404ing.
 //
 // Four groups of redirects:
 //   - top-level shared destinations on the main site (Install, Blog, etc.)
 //   - the main site's blog sections (one content-blog instance each)
 //   - deep doc paths on the main site (AI Agents children, Quick Starts)
-//   - one per provider, pointing at that provider's microsite
+//   - the legacy /providers/databricks family path
 //
-// The /providers top-level entry targets the docs index on the main site,
-// not the marketing page.
+// The rows of the Providers menu are not in this map: they are plain
+// anchors to the catalog page's sections and to the microsites (see
+// theme/NavbarItem). The /providers top-level entry targets the catalog
+// page on the main site.
 
 // Blog sections on the main site. Keep in step with `blogSections` in
 // stackql.io/docusaurus.config.js. "Tutorials" means the blog section; the
@@ -99,10 +83,9 @@ const REDIRECTS = {
   // the query library is its own site, proxied under this path on stackql.io
   '/docs/query-library':            `${MAIN_SITE}/docs/query-library/`,
   '/docs/quick-starts':             `${MAIN_SITE}/quick-starts`,
-  ...Object.fromEntries(
-    PROVIDER_SLUGS.map((s) => [`/providers/${s}`, `${providerOrigin(s)}/`]),
-  ),
-  // legacy family-level path kept for bookmarks (the main site 301s it too)
+  // legacy family-level path kept for bookmarks (the main site 301s it too).
+  // The per-provider /providers/<slug> routes that used to sit beside it
+  // went with the featured list: the menu links to the microsites directly.
   '/providers/databricks':          `${providerOrigin('databricks-account')}/`,
 };
 
@@ -118,14 +101,6 @@ const blogSectionFooterItems = BLOG_SECTIONS.map(({ slug, label }) => ({
   label,
   to: `/blog/${slug}`,
 }));
-
-// Built from PROVIDER_SLUGS so the dropdown and the redirect map can't drift
-// apart. Each item navigates locally to /providers/<slug>, which the plugin
-// then redirects to the provider microsite.
-const providerDropDownListItems = [
-  ...PROVIDER_SLUGS.map((s) => ({ label: PROVIDER_LABELS[s], to: `/providers/${s}` })),
-  { label: '... More', to: '/providers' },
-];
 
 const footerStackQLItems = [
   { label: 'Documentation', to: '/stackqldocs' },
@@ -175,18 +150,111 @@ function redirectRoutes(baseUrl, { selfUrl } = {}) {
   return redirectEntries(selfUrl).map(([from]) => redirectRoute(baseUrl, from));
 }
 
-// Docusaurus plugin: register a client-side redirect route for each entry in
-// REDIRECTS. The Redirect component lives at @site/.shared-config/components,
-// which resolves via Docusaurus's @site alias to the consumer site's root,
-// where this repo has been vendored. Options (plugins: [[redirectsPlugin,
-// { selfUrl }]]): selfUrl drops the entry that targets the site itself, see
-// redirectEntries. createConfig passes none.
-function redirectsPlugin(context, { selfUrl } = {}) {
+// The provider catalog for the Providers menu, read from `source`: an
+// http(s) URL (PROVIDER_CATALOG_URL unless overridden) or a local file path.
+// Checked against the version-1 shape documented in the main site's
+// plugins/provider-catalog; anything off fails the build with a message
+// naming the source. Network errors and 5xx responses are retried twice.
+// Memoised per source, so a multi-locale build fetches once.
+const catalogCache = new Map();
+function loadProviderCatalog(source) {
+  if (!catalogCache.has(source)) {
+    catalogCache.set(source, readProviderCatalog(source));
+  }
+  return catalogCache.get(source);
+}
+
+async function readProviderCatalog(source) {
+  const text = await readCatalogSource(source);
+  let catalog;
+  try {
+    catalog = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`[stackql-shared] the provider catalog at ${source} is not JSON: ${error.message}`);
+  }
+  const fail = (what) => {
+    throw new Error(`[stackql-shared] the provider catalog at ${source} ${what}`);
+  };
+  const text1 = (value) => typeof value === 'string' && value.length > 0;
+  if (!catalog || catalog.version !== 1) fail('is not a version 1 catalog');
+  if (!Array.isArray(catalog.categories)) fail('has no categories array');
+  catalog.categories.forEach((category, ci) => {
+    const where = `category #${ci}`;
+    if (!text1(category.id)) fail(`${where} has no id`);
+    if (!text1(category.name)) fail(`${where} has no name`);
+    if (!text1(category.url)) fail(`${where} has no url`);
+    if (!Array.isArray(category.providers)) fail(`${where} has no providers array`);
+    category.providers.forEach((provider, pi) => {
+      const which = `${where} provider #${pi}`;
+      if (!text1(provider.name)) fail(`${which} has no name`);
+      if (!text1(provider.href)) fail(`${which} has no href`);
+    });
+  });
+  return catalog;
+}
+
+async function readCatalogSource(source) {
+  if (!source.startsWith('http://') && !source.startsWith('https://')) {
+    // a local path; Node built-ins are fine here, only npm packages are not
+    const fs = require('fs');
+    return fs.promises.readFile(source, 'utf8');
+  }
+  const attempts = 3;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(source, { headers: { accept: 'application/json' } });
+      if (response.ok) return await response.text();
+      const error = new Error(`HTTP ${response.status}`);
+      error.retryable = response.status >= 500;
+      throw error;
+    } catch (error) {
+      lastError = error;
+      if (error.retryable === false || attempt === attempts) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+  throw new Error(
+    `[stackql-shared] could not fetch the provider catalog from ${source} (${lastError.message}). ` +
+      'The Providers menu is built from it, so the build stops here and the previous deploy stays live. ' +
+      'Set STACKQL_PROVIDER_CATALOG to another URL or to a local copy of the catalog to build without it.',
+  );
+}
+
+// Docusaurus plugin: the shared chrome's runtime pieces, registered once by
+// every consumer (createConfig does it; a composing site adds it to its
+// plugins). Three jobs:
+//   - a client-side redirect route for each REDIRECTS entry, rendered by
+//     @site/.shared-config/components/Redirect.js;
+//   - the provider catalog, fetched in loadContent and published as this
+//     plugin's global data for the Providers menu (theme/NavbarItem);
+//   - the theme folder (./theme) that registers the menu's navbar item
+//     type, so no consumer swizzles anything.
+// Both paths resolve against the consumer site's root, where this repo is
+// vendored as .shared-config (README, step 2). Options
+// (plugins: [[sharedPlugin, { selfUrl, catalogUrl }]]): selfUrl drops the
+// redirect that targets the site itself (see redirectEntries); catalogUrl
+// replaces PROVIDER_CATALOG_URL, and the STACKQL_PROVIDER_CATALOG
+// environment variable wins over both. createConfig passes none.
+function sharedPlugin(context, { selfUrl, catalogUrl } = {}) {
   const { baseUrl } = context.siteConfig;
+  const catalogSource = process.env.STACKQL_PROVIDER_CATALOG || catalogUrl || PROVIDER_CATALOG_URL;
   return {
-    name: 'stackql-shared-redirects',
-    async contentLoaded({ actions }) {
-      const { addRoute, createData } = actions;
+    name: 'stackql-shared',
+    getThemePath() {
+      return `${context.siteDir}/.shared-config/theme`;
+    },
+    async loadContent() {
+      const catalog = await loadProviderCatalog(catalogSource);
+      const providers = catalog.categories.reduce((n, c) => n + c.providers.length, 0);
+      console.log(
+        `[stackql-shared] provider catalog from ${catalogSource}: ${catalog.categories.length} categories, ${providers} providers`,
+      );
+      return catalog;
+    },
+    async contentLoaded({ content, actions }) {
+      const { addRoute, createData, setGlobalData } = actions;
+      setGlobalData({ catalog: content });
       for (const [from, to] of redirectEntries(selfUrl)) {
         const dataPath = await createData(
           `redirect${from.replace(/\//g, '_')}.json`,
@@ -202,6 +270,10 @@ function redirectsPlugin(context, { selfUrl } = {}) {
     },
   };
 }
+
+// The plugin's former name, kept so a site that composes its own config
+// does not break on the rename.
+const redirectsPlugin = sharedPlugin;
 
 // Shared site logo. It points at the consumer site's own root and the image
 // is served from the main site so microsites don't have to vendor it. A site
@@ -262,11 +334,14 @@ function buildNavbar({ selfUrl } = {}) {
       position: 'left',
     },
     {
-      to: '/providers',
-      type: 'dropdown',
+      // Two-level menu (category -> provider) generated from the main
+      // site's provider catalog when the site builds: PROVIDER_CATALOG_URL,
+      // sharedPlugin and theme/NavbarItem. The label itself goes to the
+      // catalog page through the shared /providers redirect.
+      type: 'custom-providersDropdown',
       label: 'Providers',
+      to: '/providers',
       position: 'left',
-      items: [...providerDropDownListItems],
     },
     {
       type: 'dropdown',
@@ -368,7 +443,7 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
     ],
     plugins: [
       '@docusaurus/plugin-ideal-image',
-      redirectsPlugin,
+      sharedPlugin,
     ],
     presets: [
       [
@@ -471,9 +546,11 @@ module.exports = {
   // createConfig".
   buildNavbar,
   buildFooter,
+  sharedPlugin,
   redirectsPlugin,
   redirectRoutes,
+  loadProviderCatalog,
   REDIRECTS,
   BLOG_SECTIONS,
-  PROVIDER_SLUGS,
+  PROVIDER_CATALOG_URL,
 };
