@@ -11,31 +11,34 @@ const MAIN_SITE = 'https://stackql.io';
 const providerOrigin = (name) => `https://${name}-provider.stackql.io`;
 
 // Provider slugs that get a local /providers/<slug> redirect to their
-// microsite. Order here drives the navbar dropdown order.
+// microsite. Order here drives the navbar dropdown order. Keep in step with
+// the `featured` entries of src/configs/providers.json in the stackql.io
+// repo (same order, label = shortName). Slugs are the microsite hostnames,
+// so Databricks is `databricks-account`.
 const PROVIDER_SLUGS = [
   'aws',
   'azure',
   'google',
-  'databricks',
+  'cloudflare',
+  'databricks-account',
   'snowflake',
   'confluent',
   'okta',
-  'github',
   'openai',
-  'cloudflare',
+  'github',
 ];
 
 const PROVIDER_LABELS = {
   aws: 'AWS',
   azure: 'Azure',
   google: 'Google',
-  databricks: 'Databricks',
+  cloudflare: 'Cloudflare',
+  'databricks-account': 'Databricks',
   snowflake: 'Snowflake',
   confluent: 'Confluent',
   okta: 'Okta',
-  github: 'GitHub',
   openai: 'OpenAI',
-  cloudflare: 'Cloudflare',
+  github: 'GitHub',
 };
 
 const awsSvg =
@@ -92,10 +95,15 @@ const REDIRECTS = {
   '/stackqldocs':                   `${MAIN_SITE}/`,
   '/docs/command-line-usage/mcp':   `${MAIN_SITE}/command-line-usage/mcp`,
   '/docs/mcp':                      `${MAIN_SITE}/mcp`,
+  '/docs/mcp/embedded':             `${MAIN_SITE}/mcp/embedded`,
+  // the query library is its own site, proxied under this path on stackql.io
+  '/docs/query-library':            `${MAIN_SITE}/docs/query-library/`,
   '/docs/quick-starts':             `${MAIN_SITE}/quick-starts`,
   ...Object.fromEntries(
     PROVIDER_SLUGS.map((s) => [`/providers/${s}`, `${providerOrigin(s)}/`]),
   ),
+  // legacy family-level path kept for bookmarks (the main site 301s it too)
+  '/providers/databricks':          `${providerOrigin('databricks-account')}/`,
 };
 
 // Built from BLOG_SECTIONS so the "More" menu, the footer and the redirect
@@ -132,11 +140,26 @@ const footerMoreItems = [
   { label: 'Quick Starts', to: '/docs/quick-starts' },
 ];
 
+// Full route path of a shared redirect on a consumer site. Docusaurus route
+// paths carry the site's baseUrl (always '/'-wrapped), so a site served
+// under a prefix - the query library at stackql.io/docs/query-library/ -
+// gets /docs/query-library/install, while a microsite at '/' gets /install.
+function redirectRoute(baseUrl, from) {
+  return `${(baseUrl || '/').replace(/\/+$/, '')}${from}`;
+}
+
+// Every shared redirect route on a consumer site: for sitemap
+// ignorePatterns, structured-data exclusions and the like.
+function redirectRoutes(baseUrl) {
+  return Object.keys(REDIRECTS).map((from) => redirectRoute(baseUrl, from));
+}
+
 // Docusaurus plugin: register a client-side redirect route for each entry in
 // REDIRECTS. The Redirect component lives at @site/.shared-config/components,
 // which resolves via Docusaurus's @site alias to the consumer site's root,
 // where this repo has been vendored.
-function redirectsPlugin() {
+function redirectsPlugin(context) {
+  const { baseUrl } = context.siteConfig;
   return {
     name: 'stackql-shared-redirects',
     async contentLoaded({ actions }) {
@@ -147,13 +170,118 @@ function redirectsPlugin() {
           JSON.stringify({ to }),
         );
         addRoute({
-          path: from,
+          path: redirectRoute(baseUrl, from),
           component: '@site/.shared-config/components/Redirect.js',
           modules: { target: dataPath },
           exact: true,
         });
       }
     },
+  };
+}
+
+// Shared site logo. It points at the consumer site's own root and the image
+// is served from the main site so microsites don't have to vendor it. A site
+// whose root is not the brand home (the query library) overrides `href`.
+// navbar.logo only accepts `href:`; a relative href stays internal.
+function buildLogo() {
+  return {
+    alt: 'StackQL',
+    href: '/',
+    src: `${MAIN_SITE}/img/logo-original.svg`,
+    srcDark: `${MAIN_SITE}/img/logo-white.svg`,
+  };
+}
+
+// A shared `to:` item whose redirect target is the consuming site itself
+// becomes an internal link to that site's root. For a property that is one
+// of the shared destinations (the query library, listed under AI Agents),
+// its own menu entry would otherwise bounce through a redirect page back to
+// where it started. The comparison lives here, next to REDIRECTS, so the
+// consumer never has to know which label or path to look for.
+function localiseSelf(item, selfUrl) {
+  if (!selfUrl || !item.to) return item;
+  const strip = (u) => String(u || '').replace(/\/+$/, '');
+  return strip(REDIRECTS[item.to]) === strip(selfUrl) ? { ...item, to: '/' } : item;
+}
+
+// themeConfig.navbar for every StackQL property. Returns a fresh object with
+// fresh arrays on each call, so a consumer composing its own config can
+// replace the logo or map over the items without touching the shared
+// template. Every `to:` below is a REDIRECTS key. `selfUrl` is the
+// consuming site's public URL (origin + baseUrl) and is optional: see
+// localiseSelf. createConfig passes none, since no microsite is a shared
+// destination.
+function buildNavbar({ selfUrl } = {}) {
+  const self = (item) => localiseSelf(item, selfUrl);
+  const items = [
+    {
+      to: '/install',
+      label: 'Install',
+      position: 'left',
+    },
+    {
+      type: 'dropdown',
+      label: 'AI Agents',
+      position: 'left',
+      // Four main-site destinations, registered in REDIRECTS so they appear
+      // local: the MCP server CLI doc, the MCP tools index, the embedded
+      // MCP guide and the query library (its own site, proxied under
+      // stackql.io/docs/query-library/).
+      items: [
+        { to: '/docs/command-line-usage/mcp', label: 'MCP Server' },
+        { to: '/docs/mcp', label: 'MCP Tools' },
+        { to: '/docs/mcp/embedded', label: 'Embedded MCP' },
+        { to: '/docs/query-library', label: 'Query Library' },
+      ],
+    },
+    {
+      to: '/stackql-deploy',
+      label: 'stackql-deploy',
+      position: 'left',
+    },
+    {
+      to: '/providers',
+      type: 'dropdown',
+      label: 'Providers',
+      position: 'left',
+      items: [...providerDropDownListItems],
+    },
+    {
+      type: 'dropdown',
+      label: 'More',
+      position: 'left',
+      items: [
+        ...blogSectionNavItems,
+        { to: '/docs/quick-starts', label: 'Quick Starts' },
+      ],
+    },
+    {
+      href: 'https://github.com/stackql/stackql',
+      position: 'right',
+      className: 'header-github-link',
+      'aria-label': 'GitHub repository',
+    },
+  ];
+  return {
+    logo: buildLogo(),
+    items: items.map((item) =>
+      item.items ? { ...self(item), items: item.items.map(self) } : self(item),
+    ),
+  };
+}
+
+// themeConfig.footer for every StackQL property, same contract as buildNavbar.
+function buildFooter({ selfUrl } = {}) {
+  const self = (item) => localiseSelf(item, selfUrl);
+  return {
+    style: 'dark',
+    logo: buildLogo(),
+    links: [
+      { title: 'StackQL', items: footerStackQLItems.map(self) },
+      { title: 'More', items: footerMoreItems.map(self) },
+    ],
+    copyright: `© ${new Date().getFullYear()} StackQL Studios ABN 65 656 147 054`,
   };
 }
 
@@ -232,7 +360,10 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
           sitemap: {
             changefreq: 'weekly',
             priority: 0.5,
-            ignorePatterns: ['/search'],
+            // The shared redirect pages are not content: keep them out of
+            // the sitemap. The pages themselves carry a canonical to their
+            // target and a meta refresh (components/Redirect.js).
+            ignorePatterns: ['/search', ...redirectRoutes('/')],
             filename: 'sitemap.xml',
           },
           pages: {},
@@ -287,79 +418,8 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
           hideable: true,
         },
       },
-      navbar: {
-        logo: {
-          alt: 'StackQL',
-          // Logo points at the microsite's own root (provider intro page).
-          // navbar.logo only accepts `href:`; a relative href stays internal.
-          href: '/',
-          // Logo image is served from the main site so microsites don't have
-          // to vendor it.
-          src: `${MAIN_SITE}/img/logo-original.svg`,
-          srcDark: `${MAIN_SITE}/img/logo-white.svg`,
-        },
-        items: [
-          {
-            to: '/install',
-            label: 'Install',
-            position: 'left',
-          },
-          {
-            type: 'dropdown',
-            label: 'AI Agents',
-            position: 'left',
-            // MCP server CLI doc and MCP tools index - two distinct main-site
-            // pages. Registered in REDIRECTS so they appear local.
-            items: [
-              { to: '/docs/command-line-usage/mcp', label: 'MCP Server' },
-              { to: '/docs/mcp', label: 'MCP Tools' },
-            ],
-          },
-          {
-            to: '/stackql-deploy',
-            label: 'stackql-deploy',
-            position: 'left',
-          },
-          {
-            to: '/providers',
-            type: 'dropdown',
-            label: 'Providers',
-            position: 'left',
-            items: providerDropDownListItems,
-          },
-          {
-            type: 'dropdown',
-            label: 'More',
-            position: 'left',
-            items: [
-              ...blogSectionNavItems,
-              { to: '/docs/quick-starts', label: 'Quick Starts' },
-            ],
-          },
-          {
-            href: 'https://github.com/stackql/stackql',
-            position: 'right',
-            className: 'header-github-link',
-            'aria-label': 'GitHub repository',
-          },
-        ],
-      },
-      footer: {
-        style: 'dark',
-        logo: {
-          alt: 'StackQL',
-          // Footer logo matches the navbar logo: points at the microsite's
-          // own root, image served from the main site.
-          href: '/',
-          src: `${MAIN_SITE}/img/logo-original.svg`,
-          srcDark: `${MAIN_SITE}/img/logo-white.svg`,
-        },
-        links: [
-          { title: 'StackQL', items: footerStackQLItems },
-          { title: 'More', items: footerMoreItems },
-        ],
-        copyright: `© ${new Date().getFullYear()} StackQL Studios ABN 65 656 147 054`,
-      },
+      navbar: buildNavbar(),
+      footer: buildFooter(),
       colorMode: {
         respectPrefersColorScheme: true,
       },
@@ -382,4 +442,17 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
   return { ...config, ...overrides };
 }
 
-module.exports = { createConfig };
+module.exports = {
+  createConfig,
+  // Building blocks for a site whose shape createConfig cannot express (a
+  // non-root baseUrl, its own plugins and presets): compose the shared
+  // chrome into your own config. See README, "Composing instead of
+  // createConfig".
+  buildNavbar,
+  buildFooter,
+  redirectsPlugin,
+  redirectRoutes,
+  REDIRECTS,
+  BLOG_SECTIONS,
+  PROVIDER_SLUGS,
+};
