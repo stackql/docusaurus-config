@@ -1,0 +1,439 @@
+# Keep the Providers menu of every provider microsite in step with the
+# catalog stackql.io publishes (https://stackql.io/providers.json).
+#
+# The menu is baked into each site when it builds (index.js, sharedPlugin),
+# so a site shows whatever the catalog said the day it last built. This
+# workflow fetches the catalog, checks the menu every site actually serves,
+# redeploys only the sites whose menu has drifted, and verifies each one came
+# back right. Gates, in order, each a condition for the next:
+#
+#   catalog    plausibility guard against catalog/last-known-good.json
+#   preflight  a real microsite built with THIS checkout of the chrome
+#              against the candidate must render the menu right
+#   check      drift check of every live site; matching sites are left alone
+#   canary     one drifted site redeployed and verified before the rest
+#   fanout     the remaining drifted sites, four at a time, fail-fast
+#   finish     per-site table; promote the candidate to last-known-good and
+#              close the menu-sync issue after a fully green run, otherwise
+#              open or update the issue and fail the run
+#
+# Scheduled and repository_dispatch runs sync; a manual run defaults to
+# check (report only). README, "Propagation", has the operator's view;
+# each script in scripts/menu-sync/ documents its own contract.
+#
+# Secrets: MICROSITE_DISPATCH_TOKEN (Actions: write on the stackql-registry
+# provider repos) and NETLIFY_BUILD_HOOKS (JSON object slug -> build hook
+# URL). The failure email of a scheduled run goes to the last person who
+# committed this file.
+
+name: menu-sync
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check = report only, sync = redeploy drifted sites'
+        type: choice
+        options: [check, sync]
+        default: check
+      only:
+        description: 'Comma-separated slugs; empty = every site in the catalog'
+        type: string
+        default: ''
+      force:
+        description: 'Redeploy even when the menu already matches, and skip the superset guard'
+        type: boolean
+        default: false
+      skip_preflight:
+        description: 'Skip the pre-flight build of a real microsite against the candidate'
+        type: boolean
+        default: false
+      catalog_url:
+        description: 'Catalog URL override, for testing the gates; default https://stackql.io/providers.json'
+        type: string
+        default: ''
+  repository_dispatch:
+    types: [catalog-updated]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: menu-sync
+  cancel-in-progress: false
+
+env:
+  CATALOG_URL: ${{ inputs.catalog_url || 'https://stackql.io/providers.json' }}
+
+jobs:
+  catalog:
+    name: catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.params.outputs.mode }}
+      only: ${{ steps.params.outputs.only }}
+      force: ${{ steps.params.outputs.force }}
+      catalog_overridden: ${{ steps.params.outputs.catalog_overridden }}
+      generated: ${{ steps.fetch.outputs.generated }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The run's parameters, resolved once here so every later job reads
+      # them from this job's outputs (the env context is not available in
+      # job-level if: conditions). Only a manual run can be check-only.
+      - name: Resolve run parameters
+        id: params
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_MODE: ${{ inputs.mode }}
+          IN_ONLY: ${{ inputs.only }}
+          IN_FORCE: ${{ inputs.force }}
+          IN_CATALOG_URL: ${{ inputs.catalog_url }}
+        run: |
+          mode=sync
+          if [ "$EVENT" = workflow_dispatch ]; then mode="${IN_MODE:-check}"; fi
+          force=false
+          if [ "$IN_FORCE" = true ]; then force=true; fi
+          overridden=false
+          if [ -n "$IN_CATALOG_URL" ]; then overridden=true; fi
+          only="$(printf '%s' "$IN_ONLY" | tr -d '[:space:]')"
+          {
+            echo "mode=$mode"
+            echo "only=$only"
+            echo "force=$force"
+            echo "catalog_overridden=$overridden"
+          } >> "$GITHUB_OUTPUT"
+          echo "event=$EVENT mode=$mode only='$only' force=$force catalog=$CATALOG_URL"
+
+      - name: Fetch the candidate catalog
+        id: fetch
+        run: |
+          sep='?'
+          case "$CATALOG_URL" in *\?*) sep='&' ;; esac
+          curl -fsSL --retry 3 --retry-delay 5 \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -H 'Accept: application/json' \
+            -o candidate.json "${CATALOG_URL}${sep}cb=$(date +%s)"
+          generated="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync("candidate.json", "utf8")).generated || "")')"
+          echo "generated=$generated" >> "$GITHUB_OUTPUT"
+          echo "candidate catalog from $CATALOG_URL, generated ${generated:-n/a}"
+
+      - name: Plausibility guard
+        env:
+          FORCE: ${{ steps.params.outputs.force }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          node scripts/menu-sync/plausible.mjs candidate.json catalog/last-known-good.json "${args[@]}"
+
+      - name: Validate the site selection
+        env:
+          ONLY: ${{ steps.params.outputs.only }}
+        run: node scripts/menu-sync/check-fleet.mjs candidate.json --dry-run --only "$ONLY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: candidate
+          path: candidate.json
+          retention-days: 14
+
+  preflight:
+    name: preflight build
+    needs: catalog
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_preflight) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: chrome
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate
+
+      - name: Clone the fixture site
+        run: git clone --depth 1 --branch main https://github.com/stackql-registry/stackql-provider-typesafe.git site
+
+      # What `yarn vendor-config` does in a real build, with this checkout in
+      # place of a fresh clone of main, so the build exercises this commit.
+      - name: Vendor this checkout as the site's shared config
+        run: |
+          rm -rf site/website/.shared-config
+          rsync -a --exclude .git chrome/ site/website/.shared-config/
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: site/website/yarn.lock
+
+      - name: Install the site's dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: site/website
+
+      # `docusaurus build` directly: `yarn build` would run the site's
+      # prebuild hook and re-vendor main over this checkout.
+      - name: Build against the candidate catalog
+        run: STACKQL_PROVIDER_CATALOG="$GITHUB_WORKSPACE/candidate.json" yarn docusaurus build
+        working-directory: site/website
+
+      - name: The built menu must match the candidate
+        run: node chrome/scripts/menu-sync/compare.mjs candidate.json site/website/build/index.html
+
+  check:
+    name: drift check
+    needs: [catalog, preflight]
+    if: ${{ !cancelled() && needs.catalog.result == 'success' && (needs.preflight.result == 'success' || needs.preflight.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      drifted: ${{ steps.fleet.outputs.drifted }}
+      canary: ${{ steps.fleet.outputs.canary }}
+      fanout: ${{ steps.fleet.outputs.fanout }}
+      errors: ${{ steps.fleet.outputs.errors }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate
+
+      # One job, eight fetches at a time: the whole fleet takes seconds. A
+      # drifted or unreachable site is a result here, not a failure; the
+      # finish job decides the run's colour.
+      - name: Compare every live menu with the candidate
+        id: fleet
+        env:
+          ONLY: ${{ needs.catalog.outputs.only }}
+          FORCE: ${{ needs.catalog.outputs.force }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          node scripts/menu-sync/check-fleet.mjs candidate.json --out results --concurrency 8 --only "$ONLY" "${args[@]}"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: result-check
+          path: results/*.json
+          retention-days: 14
+
+  canary:
+    name: canary ${{ needs.check.outputs.canary }}
+    needs: [catalog, preflight, check]
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.catalog.outputs.mode == 'sync' && needs.check.outputs.canary != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ secrets.MICROSITE_DISPATCH_TOKEN }}
+      NETLIFY_BUILD_HOOKS: ${{ secrets.NETLIFY_BUILD_HOOKS }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate
+
+      - name: Redeploy and verify
+        env:
+          SLUG: ${{ needs.check.outputs.canary }}
+        run: bash scripts/menu-sync/sync-site.sh "$SLUG" candidate.json canary results
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: result-canary
+          path: results/*.json
+          retention-days: 14
+
+  fanout:
+    name: sync ${{ matrix.site }}
+    needs: [catalog, check, canary]
+    if: ${{ !cancelled() && needs.canary.result == 'success' && needs.check.outputs.fanout != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      matrix:
+        site: ${{ fromJSON(needs.check.outputs.fanout || '[]') }}
+      max-parallel: 4
+      fail-fast: true
+    env:
+      GH_TOKEN: ${{ secrets.MICROSITE_DISPATCH_TOKEN }}
+      NETLIFY_BUILD_HOOKS: ${{ secrets.NETLIFY_BUILD_HOOKS }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate
+
+      - name: Redeploy and verify
+        env:
+          SLUG: ${{ matrix.site }}
+        run: bash scripts/menu-sync/sync-site.sh "$SLUG" candidate.json fanout results
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: result-${{ matrix.site }}
+          path: results/*.json
+          retention-days: 14
+
+  finish:
+    name: finish
+    needs: [catalog, preflight, check, canary, fanout]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: candidate
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Per-site report
+        id: report
+        env:
+          MODE: ${{ needs.catalog.outputs.mode || 'sync' }}
+          JOBS: >-
+            {"catalog":"${{ needs.catalog.result }}",
+             "preflight":"${{ needs.preflight.result }}",
+             "check":"${{ needs.check.result }}",
+             "canary":"${{ needs.canary.result }}",
+             "fanout":"${{ needs.fanout.result }}"}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          catalog=candidate.json
+          if [ ! -f candidate.json ]; then catalog=catalog/last-known-good.json; fi
+          mkdir -p results
+          node scripts/menu-sync/report.mjs "$catalog" results --mode "$MODE" --jobs "$JOBS" --md report.md --run-url "$RUN_URL"
+
+      # The candidate becomes the baseline only when the whole fleet was
+      # verified against it in this run: every site ok or synced, no --only
+      # filter, the real catalog URL. The file is also what keeps the repo
+      # active for GitHub's 60-day scheduled-workflow rule, so a changed
+      # `generated` stamp alone is committed too; the message says which.
+      - name: Promote the candidate to last-known-good
+        if: ${{ steps.report.outputs.green == 'true' && steps.report.outputs.fleet_verified == 'true' && needs.catalog.outputs.only == '' && needs.catalog.outputs.catalog_overridden != 'true' }}
+        env:
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if cmp -s candidate.json catalog/last-known-good.json; then
+            echo "last-known-good already equals the candidate"
+            exit 0
+          fi
+          summary="$(node -e '
+            const fs = require("node:fs");
+            const slugs = (p) => JSON.parse(fs.readFileSync(p, "utf8")).categories.flatMap((c) => c.providers.map((x) => x.slug));
+            const before = new Set(slugs("catalog/last-known-good.json")), after = new Set(slugs("candidate.json"));
+            const added = [...after].filter((s) => !before.has(s)), removed = [...before].filter((s) => !after.has(s));
+            const parts = [];
+            if (added.length) parts.push(`added ${added.join(", ")}`);
+            if (removed.length) parts.push(`removed ${removed.join(", ")}`);
+            console.log(parts.length ? parts.join("; ") : "generated stamp only, same providers");
+          ')"
+          generated="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync("candidate.json", "utf8")).generated || "n/a")')"
+          cp candidate.json catalog/last-known-good.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add catalog/last-known-good.json
+          git commit -m "catalog: last-known-good $generated" -m "$summary" -m "Fleet verified by menu-sync run $RUN_URL"
+          git push origin "HEAD:$BRANCH"
+          echo "committed last-known-good ($summary)"
+
+      # Same shape as the spec-drift jobs in the provider repos: one open
+      # issue per label, updated in place while the problem persists, closed
+      # by the first fully green run.
+      - name: Open, update or close the menu-sync issue
+        uses: actions/github-script@v9
+        env:
+          GREEN: ${{ steps.report.outputs.green }}
+          FLEET_VERIFIED: ${{ steps.report.outputs.fleet_verified }}
+          HEADLINE: ${{ steps.report.outputs.headline }}
+          FULL_FLEET: ${{ needs.catalog.outputs.only == '' && needs.catalog.outputs.catalog_overridden != 'true' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const {owner, repo} = context.repo;
+            const label = 'menu-sync';
+            const title = 'menu-sync: provider menus out of step with the catalog';
+            const green = process.env.GREEN === 'true';
+            const fleetVerified = process.env.FLEET_VERIFIED === 'true';
+            const fullFleet = process.env.FULL_FLEET === 'true';
+            const runUrl = process.env.RUN_URL;
+            const headline = process.env.HEADLINE || '';
+            const {data: open} = await github.rest.issues.listForRepo({owner, repo, state: 'open', labels: label, per_page: 20});
+
+            if (green) {
+              if (!(fleetVerified && fullFleet)) return;
+              for (const issue of open) {
+                await github.rest.issues.createComment({owner, repo, issue_number: issue.number, body: `Resolved: the whole fleet verified against the catalog in [this run](${runUrl}).`});
+                await github.rest.issues.update({owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'completed'});
+                core.info(`closed #${issue.number}`);
+              }
+              return;
+            }
+
+            try {
+              await github.rest.issues.getLabel({owner, repo, name: label});
+            } catch {
+              await github.rest.issues.createLabel({owner, repo, name: label, color: 'd93f0b', description: 'Opened by the menu-sync workflow'});
+            }
+            const table = fs.existsSync('report.md') ? fs.readFileSync('report.md', 'utf8') : '(no report)';
+            const body = `${table}\nOpened by the menu-sync workflow. It updates this issue while the problem persists and closes it after the next run in which the whole fleet verifies against the catalog. See README, "Propagation".`;
+            if (open.length) {
+              const issue = open[0];
+              await github.rest.issues.update({owner, repo, issue_number: issue.number, title, body});
+              await github.rest.issues.createComment({owner, repo, issue_number: issue.number, body: `Still failing: ${headline} ([run](${runUrl}))`});
+              core.info(`updated #${issue.number}`);
+            } else {
+              const {data: issue} = await github.rest.issues.create({owner, repo, title, body, labels: [label]});
+              core.info(`opened #${issue.number}`);
+            }
+
+      - name: Fail the run when it is not green
+        if: ${{ steps.report.outputs.green != 'true' }}
+        env:
+          HEADLINE: ${{ steps.report.outputs.headline }}
+        run: |
+          echo "::error title=menu-sync::$HEADLINE"
+          exit 1
