@@ -48,11 +48,19 @@ the `createConfig` factory from there.
   are bundled by the consumer's build and use only React, Docusaurus core
   aliases and theme-classic components, so they resolve under any
   dependency set.
+- `.github/workflows/menu-sync.yml` and `scripts/menu-sync/` - the
+  scheduled workflow that keeps the Providers menu of every deployed
+  microsite in step with the catalog, and the scripts it runs. See
+  "Propagation".
+- `catalog/last-known-good.json` - the last catalog the whole fleet was
+  verified against, written by that workflow. The baseline its plausibility
+  guard compares a new catalog with, and an audit trail of catalog changes.
 - `README.md` - this file.
 
-Optionally (not yet added): shared static assets (`custom.css`, logos) and a
-smoke-test CI that imports `createConfig` and runs `docusaurus build` against a
-fixture site before merging to `main`.
+Optionally (not yet added): shared static assets (`custom.css`, logos). The
+smoke test of `main` is the menu-sync workflow's preflight job, which
+builds a real microsite against this checkout on every run; it does not yet
+run on pull requests.
 
 ## Using it in a site
 
@@ -344,16 +352,76 @@ repo lists providers.
 
 ## Propagation
 
-A shared-repo change reaches a deployed site on that site's next build. Sites
-rebuild naturally on their own content pushes. To push a shared change out
-without editing any site repo:
+A shared-repo change reaches a deployed site on that site's next build, and
+sites rebuild on their own content pushes. The Providers menu is the one part
+of the chrome whose source changes without any site being touched (a provider
+added to the catalog), so `.github/workflows/menu-sync.yml` keeps it in step.
+Every day at 04:23 UTC, and on a `repository_dispatch` of type
+`catalog-updated`, it fetches the catalog, inspects the menu every microsite
+actually serves, redeploys only the sites whose menu has drifted, and verifies
+each one came back right. A synced fleet redeploys nothing.
 
-- Netlify: create a build hook per site (a URL you POST to) and have a script
-  POST all of them.
-- GitHub Pages: trigger each site's Actions workflow via `workflow_dispatch` or
-  `repository_dispatch`.
+The jobs, in order; each is a gate for the next:
 
-This is a fan-out of build triggers, not edits.
+1. `catalog` - fetch the candidate (cache-busted), require version 1, and run
+   `scripts/menu-sync/plausible.mjs` against `catalog/last-known-good.json`:
+   every provider the baseline had must still be present and the category
+   count must not drop. A catalog that lost providers is not rolled out.
+2. `preflight` - clone `stackql-registry/stackql-provider-typesafe`, vendor
+   this checkout as its `.shared-config`, build it against the candidate
+   (`STACKQL_PROVIDER_CATALOG`, calling `docusaurus build` directly so the
+   site's prebuild does not re-vendor `main`), and check the built menu with
+   `compare.mjs`. A chrome commit that builds but renders the menu wrong
+   stops here. This is the smoke test of `main`.
+3. `check` - `scripts/menu-sync/compare.mjs` against the live homepage of
+   every site in the catalog: the provider and category rows inside the
+   navbar, as sets, against the catalog. Zero rows is `no-menu`, which
+   counts as drift. A site whose menu matches is never redeployed.
+4. `canary` - the first drifted GitHub Pages site (catalog order) is
+   redeployed and its live menu polled until it matches.
+5. `fanout` - the remaining drifted sites, four at a time, fail-fast; each
+   job verifies its own site before it is green, and the first verification
+   failure stops further dispatches.
+6. `finish` - per-site table in the job summary. After a fully green run of
+   the whole fleet the candidate is committed as `catalog/last-known-good.json`
+   and the open `menu-sync` issue, if any, is closed; otherwise the issue is
+   opened or updated with the table and the run fails, which emails the last
+   person who committed the workflow file.
+
+Redeploys come from the catalog entry, nothing here lists sites:
+`deployedBy: github` dispatches the repo's `prod-web-deploy.yml` on the
+catalog branch with `gh workflow run` and watches that run (secret
+`MICROSITE_DISPATCH_TOKEN`, Actions: write on the `stackql-registry` repos;
+entra-id's workflow is `deploy-website.yml`, the one exception in
+`redeploy.sh`); `deployedBy: netlify` POSTs the site's build hook (secret
+`NETLIFY_BUILD_HOOKS`, a JSON object slug -> hook URL). Verification is the
+same comparison against the live site, polled every minute for up to 25
+minutes (GitHub Pages) or 45 (Netlify).
+
+Manual runs (Actions > menu-sync > Run workflow):
+
+- `mode`: `check` reports drift and redeploys nothing (the default for a
+  manual run; it goes green with a drift summary); `sync` redeploys.
+  Scheduled and `repository_dispatch` runs are `sync`.
+- `only`: comma-separated slugs to restrict the run to.
+- `force`: redeploy even when the menu already matches (the way to push a
+  chrome-only change out), and skip the superset rule of the guard (the way
+  to roll out a deliberate provider removal).
+- `skip_preflight`: skip job 2.
+- `catalog_url`: another catalog to run against, for testing the gates.
+  Nothing is promoted to last-known-good from such a run.
+
+The scripts run on the runner's own tools (bash, curl, gh) and Node 22
+built-ins; this repo has no `package.json` by design. Each script's header
+is its contract, and all of them run locally against the live fleet:
+`node scripts/menu-sync/check-fleet.mjs catalog/last-known-good.json --out /tmp/r`
+is the drift check, `REDEPLOY_DRY_RUN=1` makes `redeploy.sh` and
+`sync-site.sh` print what they would dispatch.
+
+Not covered: the main site and `query-library.stackql.io` consume the
+catalog too but are not catalog entries; add them as extra targets if
+wanted. A follow-up that would make the menu live without any rebuild is
+fetching the catalog in the browser at page view.
 
 ## Reliability
 
@@ -367,10 +435,11 @@ build behavior and in guarding `main`.
   rule: a catalog that cannot be fetched or does not validate stops the
   build. "Provider catalog" has the override for working offline.
 - **Guard `main`.** Every site tracks it unpinned, so a bad commit breaks the
-  next build of every site at once. Protect the branch with PR review and a CI
-  smoke test in this repo that imports `createConfig`, invokes it, and runs
-  `docusaurus build` against a fixture site before merge. A green `main` is
-  the propagation gate.
+  next build of every site at once. Protect the branch with PR review. The
+  menu-sync workflow's preflight job builds a real microsite against every
+  checkout it runs on and will not redeploy anything from a checkout that
+  renders the menu wrong; run it in `check` mode on a branch before merging
+  a chrome change. A green `main` is the propagation gate.
 - **Fresh each build.** The `rm -rf` before clone ensures the vendored copy is
   always current `main`, never a cached stale one.
 
@@ -385,11 +454,13 @@ build behavior and in guarding `main`.
 
 ## Rollout order
 
-1. Land this repo on `main`. Add the smoke-test CI before relying on it.
+1. Land this repo on `main`. The menu-sync workflow's preflight job is the
+   smoke test; run it in `check` mode after any chrome change.
 2. Wire one pilot provider site (steps 1-6 above). Build locally and on the
    platform. Confirm the header, footer, and menus render identically to
    before, and that the absolute cross-site links resolve to the right
    properties.
 3. Apply the same wiring to the remaining sites.
-4. (Optional) Set up the rebuild fan-out so shared changes go live without
-   waiting for a content push.
+4. Configure the menu-sync workflow's secrets (see "Propagation") so menu
+   changes go live without waiting for a content push. A chrome-only change
+   is pushed out with a `force` run.
