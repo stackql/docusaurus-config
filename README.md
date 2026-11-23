@@ -329,7 +329,10 @@ What it does to the config:
   every doc page except the provider-intro page at `/`; the native
   `BreadcrumbList` Docusaurus writes on docs pages reused rather than
   duplicated; the shared redirect stubs excluded; no `SearchAction` (the
-  microsites have no `/search`).
+  microsites have no `/search`); `speakable` limited to `h1` and
+  `article p:first-of-type` (the plugin's default also lists
+  `[data-speakable]`, which no page here carries, and validator.schema.org
+  reports a selector that matches nothing as an error).
 - Removes the hand-written `SoftwareApplication` JSON-LD head tag (matched
   by its `@type`). The plugin emits one on the provider-intro page instead,
   as its `WebPage.mainEntity`, when that page's front matter has
