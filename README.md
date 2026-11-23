@@ -52,6 +52,10 @@ the `createConfig` factory from there.
   scheduled workflow that keeps the Providers menu of every deployed
   microsite in step with the catalog, and the scripts it runs. See
   "Propagation".
+- `withStructuredData` (in `index.js`) and `scripts/structured-data/` -
+  opt-in JSON-LD for a provider microsite and the script that checks a
+  built or deployed site against it. Piloted on two sites. See
+  "Structured data".
 - `catalog/last-known-good.json` - the last catalog the whole fleet was
   verified against, written by that workflow. The baseline its plausibility
   guard compares a new catalog with, and an audit trail of catalog changes.
@@ -283,6 +287,85 @@ const config = {
   `ignorePatterns`, structured-data exclusions and similar.
 - The consumer today is the query library (`query-library.stackql.io`
   repo), proxied at `stackql.io/docs/query-library/`.
+
+## Structured data
+
+Pilot status: opt-in, used by `homebrew` (GitHub Pages) and `cloudflare`
+(Netlify) only. `createConfig` output is unchanged, and every other site
+builds as before.
+
+`withStructuredData(config, { providerName, providerTitle })` takes the
+config `createConfig` returned and adds JSON-LD from
+[`@stackql/docusaurus-plugin-structured-data`](https://github.com/stackql-labs/docusaurus-plugin-structured-data)
+(1.9.0 or later):
+
+```js
+import { createConfig, withStructuredData } from './.shared-config/index.js';
+
+const config = withStructuredData(
+  createConfig({ providerName, providerTitle, prismThemes }),
+  { providerName, providerTitle },
+);
+// site-local adjustments stay here, after the wrap
+export default config;
+```
+
+What it does to the config:
+
+- Appends `'@stackql/docusaurus-plugin-structured-data'` to `plugins`, by
+  name, so it resolves from the site's own `node_modules` and this module
+  still imports nothing. **The site must add the dependency**
+  (`@stackql/docusaurus-plugin-structured-data@^1.9.0` in
+  `website/package.json`, lockfile refreshed with the site's own package
+  manager).
+- Sets `themeConfig.structuredData`: stackql.io's Organization by `@id`
+  (`https://stackql.io/#organization`, with the name, url, logo and sameAs
+  stackql.io's own graph carries), so every `publisher` names the parent
+  site rather than a second organization; a `SoftwareSourceCode` node for
+  `stackql-registry/stackql-provider-<repo>` authored by that
+  Organization (no `license`: the provider repos are not all under the
+  same licence); `SoftwareApplication` defaults (`StackQL <Title>
+  Provider`, free, download link to the install page); `TechArticle` on
+  every doc page except the provider-intro page at `/`; the native
+  `BreadcrumbList` Docusaurus writes on docs pages reused rather than
+  duplicated; the shared redirect stubs excluded; no `SearchAction` (the
+  microsites have no `/search`).
+- Removes the hand-written `SoftwareApplication` JSON-LD head tag (matched
+  by its `@type`). The plugin emits one on the provider-intro page instead,
+  as its `WebPage.mainEntity`, when that page's front matter has
+  `softwareApplication: true` (add it to
+  `provider-dev/docgen/provider-data/headerContent1.txt` and regenerate
+  the docs).
+- Turns on the docs plugin's `showLastUpdateTime`, so `dateModified` is
+  each page's last commit. That needs full git history at build time:
+  `fetch-depth: 0` on the checkout step of a GitHub Pages workflow. With a
+  shallow clone every page carries the same date.
+
+It throws if the plugin is already in `plugins`, if
+`themeConfig.structuredData` is already set, or if `presets[0]` is not the
+classic preset.
+
+`scripts/structured-data/check-site.mjs` checks the result, on a build or
+on the live site (Node 22 built-ins, same conventions as
+`scripts/menu-sync/`; the header is its contract):
+
+```sh
+# a local build, with dateModified compared against git for three doc pages
+node scripts/structured-data/check-site.mjs ../site/website/build --git ../site/website/docs
+
+# the deployed site: these URLs, every sitemap URL, plus the redirect stubs and /404.html
+node scripts/structured-data/check-site.mjs https://homebrew-provider.stackql.io/ --sitemap
+```
+
+It prints a per-page table and exits non-zero on any failure. Pages that
+share a `description` are reported as a warning only.
+
+Building on Windows: Docusaurus 3.10's eager git lookup (selected by
+`future.faster` through its `gitEagerVcs` flag) misses every file when the
+working directory's drive letter is lower case (`c:\...`, as VS Code
+terminals start), so every page gets the build time as `dateModified`.
+Build from `C:\...` (`cd "C:/..."` in Git Bash). The Linux runners are not
+affected.
 
 ## Cross-site link behavior
 
