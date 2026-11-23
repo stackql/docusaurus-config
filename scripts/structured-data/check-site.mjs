@@ -49,6 +49,10 @@
 //     WebPage.mainEntity
 //   page: TechArticle on every docs page except /, and not on /
 //   page: WebPage.url equals the page's <link rel=canonical> href
+//   page: each WebPage.speakable cssSelector that is a bare tag name ("h1")
+//     or attribute ("[data-speakable]") matches something in the page
+//     (validator.schema.org reports one that matches nothing as an error);
+//     other selector forms are not checked
 //   stub, 404: no plugin block
 //   all: no SoftwareApplication in any block but the plugin's (the
 //     hand-written head tag createConfig adds is gone); no
@@ -233,6 +237,16 @@ export function checkPage({route, html, redirects, organization}) {
   // TechArticle on docs pages other than /
   if (route === '/' && techArticles.length) fail('TechArticle on /');
   if (route !== '/' && isDoc && !techArticles.length) fail('docs page without TechArticle');
+
+  // speakable selectors that can be checked without a DOM
+  const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '');
+  const selectors = [].concat((webPage.speakable && webPage.speakable.cssSelector) || []);
+  for (const selector of selectors) {
+    const attr = /^\[([\w-]+)\]$/.exec(selector);
+    const tag = /^[a-z][a-z0-9]*$/i.exec(selector);
+    if (attr && !new RegExp(`<[a-z][^>]*\\s${attr[1]}(?=[\\s=>/])`, 'i').test(markup)) fail(`speakable selector ${selector} matches nothing`);
+    if (tag && !new RegExp(`<${selector}\\b`, 'i').test(markup)) fail(`speakable selector ${selector} matches nothing`);
+  }
 
   // canonical
   const canonical = tags(html, 'link').find((l) => (l.rel || '').toLowerCase().split(/\s+/).includes('canonical'));

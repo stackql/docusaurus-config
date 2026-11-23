@@ -660,6 +660,10 @@ function withStructuredData(config, { providerName, providerTitle } = {}) {
       featuredImageDimensions: { width: 1200, height: 627 },
       // provider sites have no /search
       website: { potentialAction: [] },
+      // the plugin's default speakable selectors minus [data-speakable]: no
+      // page here carries that attribute, and validator.schema.org reports
+      // a speakable selector that matches nothing as an error
+      speakable: { cssSelector: ['h1', 'article p:first-of-type'] },
       organization: structuredClone(MAIN_SITE_ORGANIZATION),
       softwareSourceCode: {
         name: repo,
