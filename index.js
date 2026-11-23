@@ -10,6 +10,20 @@
 const MAIN_SITE = 'https://stackql.io';
 const providerOrigin = (name) => `https://${name}-provider.stackql.io`;
 
+// providerName is SQL-identifier-shaped (may contain underscores, e.g.
+// 'entra_id'). Underscores aren't valid in DNS labels, so derive a slug for
+// URLs and hostnames. providerName itself stays unchanged in user-visible
+// text (titles, labels, keywords) where the underscore is correct.
+//
+// providerRepo is the GitHub repo name under stackql-registry, which uses
+// neither separator (e.g. 'entra_id' -> 'entraid').
+function providerIds(providerName) {
+  return {
+    providerSlug: providerName.replace(/_/g, '-'),
+    providerRepo: providerName.replace(/_/g, ''),
+  };
+}
+
 // The Providers menu is a two-level dropdown (category -> provider) built
 // from the provider catalog the main site publishes at
 // https://stackql.io/providers.json (stackql.io repo: plugins/provider-catalog,
@@ -389,15 +403,7 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
     throw new Error('createConfig requires prismThemes (pass `themes` from prism-react-renderer)');
   }
 
-  // providerName is SQL-identifier-shaped (may contain underscores, e.g.
-  // 'entra_id'). Underscores aren't valid in DNS labels, so derive a slug for
-  // URLs and hostnames. providerName itself stays unchanged in user-visible
-  // text (titles, labels, keywords) where the underscore is correct.
-  //
-  // providerRepo is the GitHub repo name under stackql-registry, which uses
-  // neither separator (e.g. 'entra_id' -> 'entraid').
-  const providerSlug = providerName.replace(/_/g, '-');
-  const providerRepo = providerName.replace(/_/g, '');
+  const { providerSlug, providerRepo } = providerIds(providerName);
 
   const lightCodeTheme = prismThemes.github;
   const darkCodeTheme = prismThemes.dracula;
@@ -538,8 +544,145 @@ function createConfig({ providerName, providerTitle, prismThemes, overrides = {}
   return { ...config, ...overrides };
 }
 
+// Structured data (JSON-LD) for a provider microsite, opt-in while it is
+// piloted (README, "Structured data"). Sites that do not call this are
+// unchanged.
+const STRUCTURED_DATA_PLUGIN = '@stackql/docusaurus-plugin-structured-data';
+const CLASSIC_PRESETS = ['@docusaurus/preset-classic', 'classic'];
+
+// stackql.io's Organization, as its own graph states it (stackql.io repo:
+// themeConfig.structuredData.organization, siteConfig.title and url). A
+// microsite names it by @id instead of describing a second organization.
+// Keep in step with that config.
+const MAIN_SITE_ORGANIZATION = {
+  '@id': `${MAIN_SITE}/#organization`,
+  name: 'StackQL',
+  url: MAIN_SITE,
+  logo: {
+    '@type': 'ImageObject',
+    inLanguage: 'en-US',
+    '@id': `${MAIN_SITE}/#logo`,
+    url: `${MAIN_SITE}/android-chrome-512x512.png`,
+    contentUrl: `${MAIN_SITE}/android-chrome-512x512.png`,
+    width: 512,
+    height: 512,
+    caption: 'StackQL',
+  },
+  sameAs: [
+    'https://twitter.com/stackql',
+    'https://www.linkedin.com/company/stackql',
+    'https://github.com/stackql',
+    'https://www.youtube.com/@stackql',
+    'https://hub.docker.com/u/stackql',
+  ],
+};
+
+const pluginName = (entry) =>
+  typeof entry === 'string' ? entry : Array.isArray(entry) && typeof entry[0] === 'string' ? entry[0] : null;
+
+// A head tag that is a JSON-LD SoftwareApplication (the one createConfig
+// writes by hand), recognised by its parsed @type rather than its position.
+function isSoftwareApplicationJsonLd(tag) {
+  if (!tag || tag.tagName !== 'script') return false;
+  if (!tag.attributes || tag.attributes.type !== 'application/ld+json') return false;
+  try {
+    const types = [].concat(JSON.parse(tag.innerHTML)['@type']);
+    return types.includes('SoftwareApplication');
+  } catch {
+    return false;
+  }
+}
+
+// Adds @stackql/docusaurus-plugin-structured-data to a createConfig result,
+// with the settings every provider microsite shares, and returns the config.
+//
+//   export default withStructuredData(
+//     createConfig({ providerName, providerTitle, prismThemes }),
+//     { providerName, providerTitle },
+//   );
+//
+// The plugin is registered by name, so it resolves from the site's own
+// node_modules (the site adds the dependency) and this module still imports
+// nothing. Also: the hand-written SoftwareApplication JSON-LD head tag is
+// removed (the plugin emits one on the provider-intro page instead, from its
+// `softwareApplication: true` front matter), and the docs plugin's
+// showLastUpdateTime is turned on so dateModified is the page's last commit.
+// That needs full git history at build time (fetch-depth: 0 on GitHub
+// Pages); a shallow clone gives every page the same date.
+function withStructuredData(config, { providerName, providerTitle } = {}) {
+  if (!providerName || !providerTitle) {
+    throw new Error('withStructuredData requires providerName and providerTitle');
+  }
+  if (!config || typeof config !== 'object') {
+    throw new Error('withStructuredData takes the config createConfig returned');
+  }
+  const plugins = Array.isArray(config.plugins) ? config.plugins : [];
+  if (plugins.some((entry) => /docusaurus-plugin-structured-data/.test(pluginName(entry) || ''))) {
+    throw new Error(
+      `withStructuredData: ${STRUCTURED_DATA_PLUGIN} is already in config.plugins; remove it, or do not call withStructuredData`,
+    );
+  }
+  if (config.themeConfig && config.themeConfig.structuredData) {
+    throw new Error('withStructuredData: config.themeConfig.structuredData is already set; withStructuredData owns it');
+  }
+  const [preset, ...otherPresets] = Array.isArray(config.presets) ? config.presets : [];
+  const presetName = Array.isArray(preset) ? preset[0] : preset;
+  if (!CLASSIC_PRESETS.includes(presetName)) {
+    throw new Error(
+      `withStructuredData: config.presets[0] must be ['@docusaurus/preset-classic', { ... }] (got ${JSON.stringify(presetName)})`,
+    );
+  }
+  const presetOptions = (Array.isArray(preset) && preset[1]) || {};
+  if (presetOptions.docs === false) {
+    throw new Error('withStructuredData: the classic preset has docs: false; provider microsites need the docs plugin');
+  }
+
+  const { providerRepo } = providerIds(providerName);
+  const repo = `stackql-provider-${providerRepo}`;
+
+  config.plugins = [...plugins, STRUCTURED_DATA_PLUGIN];
+  config.headTags = (config.headTags || []).filter((tag) => !isSoftwareApplicationJsonLd(tag));
+  config.presets = [
+    [presetName, { ...presetOptions, docs: { ...presetOptions.docs, showLastUpdateTime: true } }],
+    ...otherPresets,
+  ];
+  config.themeConfig = {
+    ...config.themeConfig,
+    structuredData: {
+      // Docusaurus already emits a BreadcrumbList on docs pages
+      nativeStructuredData: 'reuse',
+      // the shared redirect stubs (/install, /docs/mcp, ...) are not content
+      excludedRoutes: redirectRoutes(config.baseUrl || '/'),
+      // docs live at '/'; the /docs/* routes here are redirect stubs
+      techArticleRoutePrefixes: [],
+      techArticleDocsInstances: ['default'],
+      // themeConfig.image, img/stackql-featured-image.png
+      featuredImageDimensions: { width: 1200, height: 627 },
+      // provider sites have no /search
+      website: { potentialAction: [] },
+      organization: structuredClone(MAIN_SITE_ORGANIZATION),
+      softwareSourceCode: {
+        name: repo,
+        codeRepository: `https://github.com/stackql-registry/${repo}`,
+        author: { '@id': MAIN_SITE_ORGANIZATION['@id'] },
+      },
+      softwareApplication: {
+        name: `StackQL ${providerTitle} Provider`,
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'macOS, Linux, Windows',
+        isAccessibleForFree: true,
+        downloadUrl: `${MAIN_SITE}/installing-stackql`,
+      },
+    },
+  };
+  return config;
+}
+
 module.exports = {
   createConfig,
+  // Opt-in structured data for a provider microsite: wraps a createConfig
+  // result. See README, "Structured data".
+  withStructuredData,
   // Building blocks for a site whose shape createConfig cannot express (a
   // non-root baseUrl, its own plugins and presets): compose the shared
   // chrome into your own config. See README, "Composing instead of
